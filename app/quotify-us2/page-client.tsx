@@ -899,6 +899,7 @@ export default function QuotifyUs2PageClient() {
           insuranceGoal: answers.insuranceGoal,
           residencyStatus: answers.residencyStatus,
           annualIncome: answers.annualIncome,
+          tag: "qt-vercel2-flargo",
           state: resolvedState || resolvedDetectedState,
           firstName: answers.firstName.trim(),
           lastName: answers.lastName.trim(),

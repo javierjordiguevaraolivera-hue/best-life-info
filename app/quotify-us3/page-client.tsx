@@ -958,6 +958,7 @@ export default function QuotifyUs3PageClient() {
           residencyStatus: answers.residencyStatus,
           annualIncome: answers.annualIncome,
           "actual-fondos-retiro": actualFondosRetiro,
+          tag: "qt-vercel-actual-retiro",
           state: resolvedState || resolvedDetectedState,
           firstName: answers.firstName.trim(),
           lastName: answers.lastName.trim(),
