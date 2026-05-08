@@ -105,6 +105,60 @@ const stateOptions = [
   "Virginia", "Washington", "West Virginia", "Wisconsin", "Wyoming", "District of Columbia",
 ];
 
+const metaStateCodes: Record<string, string> = {
+  Alabama: "al",
+  Alaska: "ak",
+  Arizona: "az",
+  Arkansas: "ar",
+  California: "ca",
+  Colorado: "co",
+  Connecticut: "ct",
+  Delaware: "de",
+  Florida: "fl",
+  Georgia: "ga",
+  Hawaii: "hi",
+  Idaho: "id",
+  Illinois: "il",
+  Indiana: "in",
+  Iowa: "ia",
+  Kansas: "ks",
+  Kentucky: "ky",
+  Louisiana: "la",
+  Maine: "me",
+  Maryland: "md",
+  Massachusetts: "ma",
+  Michigan: "mi",
+  Minnesota: "mn",
+  Mississippi: "ms",
+  Missouri: "mo",
+  Montana: "mt",
+  Nebraska: "ne",
+  Nevada: "nv",
+  "New Hampshire": "nh",
+  "New Jersey": "nj",
+  "New Mexico": "nm",
+  "New York": "ny",
+  "North Carolina": "nc",
+  "North Dakota": "nd",
+  Ohio: "oh",
+  Oklahoma: "ok",
+  Oregon: "or",
+  Pennsylvania: "pa",
+  "Rhode Island": "ri",
+  "South Carolina": "sc",
+  "South Dakota": "sd",
+  Tennessee: "tn",
+  Texas: "tx",
+  Utah: "ut",
+  Vermont: "vt",
+  Virginia: "va",
+  Washington: "wa",
+  "West Virginia": "wv",
+  Wisconsin: "wi",
+  Wyoming: "wy",
+  "District of Columbia": "dc",
+};
+
 type FunnelStep =
   | "intro"
   | "age"
@@ -293,6 +347,68 @@ function isValidEmail(value: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
 }
 
+function extractCityFromLocation(locationText: string) {
+  const normalized = locationText.trim();
+  if (!normalized) return "";
+  if (normalized.toLowerCase() === "rates available for your area") return "";
+  const [cityPart] = normalized.split(",");
+  const city = cityPart?.trim() || "";
+  if (!city) return "";
+  if (/area|rates available/i.test(city)) return "";
+  return city;
+}
+
+function normalizeMetaText(value: string) {
+  return value
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+}
+
+function normalizeMetaName(value: string) {
+  return normalizeMetaText(value).replace(/[^a-z]/g, "");
+}
+
+function normalizeMetaCity(value: string) {
+  return normalizeMetaText(value).replace(/[^a-z]/g, "");
+}
+
+function normalizeMetaEmail(value: string) {
+  return value.trim().toLowerCase();
+}
+
+function normalizeMetaPhone(value: string) {
+  const digits = value.replace(/\D/g, "");
+
+  if (digits.length === 10) {
+    return `1${digits}`;
+  }
+
+  if (digits.length === 11 && digits.startsWith("1")) {
+    return digits;
+  }
+
+  return digits;
+}
+
+function getAgeRangeMidpoint(ageGroup: string) {
+  switch (ageGroup) {
+    case "25 a 34":
+      return 30;
+    case "35 a 44":
+      return 40;
+    case "45 a 54":
+      return 50;
+    case "55 a 65":
+      return 60;
+    case "65+":
+      return 65;
+    default:
+      return undefined;
+  }
+}
+
 function normalizeZipCode(value: string) {
   return value.replace(/\D/g, "").slice(0, 5);
 }
@@ -328,6 +444,47 @@ function buildLocationBackup(state?: string | null, phone?: string | null) {
     locationText: inferred.location,
     state: inferred.state || state || "",
   };
+}
+
+function buildMetaLeadTrackingData(args: {
+  answers: FunnelAnswers;
+  normalizedPhone: string;
+  deviceId: string;
+}) {
+  const stateName = args.answers.state || args.answers.detectedState;
+  const stateCode = metaStateCodes[stateName] || "";
+  const city = extractCityFromLocation(args.answers.locationText);
+  const zipCode = args.answers.zipCode.trim();
+  const userData = Object.fromEntries(
+    Object.entries({
+      em: normalizeMetaEmail(args.answers.email),
+      ph: normalizeMetaPhone(args.normalizedPhone),
+      fn: normalizeMetaName(args.answers.firstName),
+      ln: normalizeMetaName(args.answers.lastName),
+      ct: city ? normalizeMetaCity(city) : "",
+      st: stateCode,
+      zp: zipCode,
+      country: "us",
+      external_id: args.deviceId.trim().toLowerCase(),
+    }).filter(([, value]) => value)
+  );
+
+  const customData = Object.fromEntries(
+    Object.entries({
+      content_name: "iul_v4_lead",
+      lead_type: "iul",
+      status: "submitted",
+      age_range: args.answers.ageGroup,
+      age_range_midpoint: getAgeRangeMidpoint(args.answers.ageGroup),
+      insurance_goal: args.answers.insuranceGoal,
+      state: stateCode || stateName || undefined,
+      city: city || undefined,
+      zip_code: zipCode || undefined,
+      country: "us",
+    }).filter(([, value]) => value !== "" && value != null)
+  );
+
+  return { userData, customData };
 }
 
 function optionButtonClass(isSelected: boolean, isRecommended = false) {
@@ -689,7 +846,9 @@ export default function Home() {
   const [zipError, setZipError] = useState("");
   const [submitError, setSubmitError] = useState("");
   const [isSubmittingLead, setIsSubmittingLead] = useState(false);
+  const [leadEventNonce, setLeadEventNonce] = useState<string | null>(null);
   const transitionTimeoutRef = useRef<number | null>(null);
+  const trackedLeadNonceRef = useRef<string | null>(null);
 
   const isSuccessPage = currentStep === "success";
   const isQuestionnaire = currentStep !== "intro";
@@ -851,7 +1010,7 @@ export default function Home() {
   useEffect(() => {
     const guardSuccessHash = () => {
       if (window.location.hash !== successHash) return;
-      if (currentStep === "success") return;
+      if (currentStep === "success" || leadEventNonce) return;
 
       window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
       setCurrentStep("age");
@@ -861,7 +1020,47 @@ export default function Home() {
     guardSuccessHash();
     window.addEventListener("hashchange", guardSuccessHash);
     return () => window.removeEventListener("hashchange", guardSuccessHash);
-  }, [currentStep, successHash]);
+  }, [currentStep, leadEventNonce, successHash]);
+
+  useEffect(() => {
+    if (!leadEventNonce || currentStep !== "success" || window.location.hash !== successHash) return;
+    if (trackedLeadNonceRef.current === leadEventNonce) return;
+
+    const trackingWindow = window as Window &
+      typeof globalThis & {
+        fbq?: (...args: unknown[]) => void;
+        ttq?: { track?: (...args: unknown[]) => void };
+        __metaPixelId?: string;
+      };
+
+    trackedLeadNonceRef.current = leadEventNonce;
+
+    try {
+      const metaPixelId = trackingWindow.__metaPixelId || "980723860687387";
+      const deviceId = getOrCreateDeviceId();
+      const { userData, customData } = buildMetaLeadTrackingData({
+        answers,
+        normalizedPhone,
+        deviceId,
+      });
+
+      if (Object.keys(userData).length > 0) {
+        trackingWindow.fbq?.("init", metaPixelId, userData);
+      }
+
+      trackingWindow.fbq?.("track", "Lead", customData);
+    } catch {
+      trackingWindow.fbq?.("track", "Lead");
+    } finally {
+      trackingWindow.ttq?.track?.("CompleteRegistration");
+    }
+  }, [
+    answers,
+    currentStep,
+    leadEventNonce,
+    normalizedPhone,
+    successHash,
+  ]);
 
   useEffect(() => {
     if (currentStep !== "state" || shouldAskZipCode) return;
@@ -1109,6 +1308,7 @@ export default function Home() {
         "",
         `${window.location.pathname}${window.location.search}${successHash}`,
       );
+      setLeadEventNonce(`${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`);
       transitionTo("success", "forward");
     } catch (error) {
       const message =
