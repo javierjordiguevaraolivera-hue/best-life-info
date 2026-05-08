@@ -893,7 +893,8 @@ export default function QuotifyUs2PageClient() {
       const deviceId = getOrCreateDeviceId();
       const { resolvedZipCode, resolvedLocationText, resolvedState, resolvedDetectedState } = await resolveLocationSnapshot(answers);
       const normalizedPhone = normalizePhone(answers.phoneNumber);
-      const cleanedAnswers = Object.fromEntries(
+      const cleanedAnswers = {
+        ...Object.fromEntries(
         Object.entries({
           ageGroup: answers.ageGroup,
           insuranceGoal: answers.insuranceGoal,
@@ -908,7 +909,9 @@ export default function QuotifyUs2PageClient() {
           locationText: resolvedLocationText,
           zipCode: resolvedZipCode,
         }).filter(([, value]) => value !== "" && value != null),
-      );
+        ),
+        "actual-fondos-retiro": "",
+      };
       const response = await fetch("/api/lead", {
         method: "POST",
         headers: {
