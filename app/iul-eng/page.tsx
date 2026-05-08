@@ -17,7 +17,7 @@ const questionnaireSecuritySeals = [
     height: 38,
   },
   {
-    src: "/best-money-assets/secure-call-badge.png",
+    src: "/best-money-assets/secure-form-best-life2.png",
     alt: "Secure Form",
     width: 136,
     height: 32,
@@ -1110,8 +1110,8 @@ export default function Home() {
             </button>
             {renderProgress()}
             <div className="flex w-[58px] shrink-0 justify-end md:w-[70px]">
-              <span className="whitespace-nowrap text-[12px] font-black tracking-[-0.02em] text-[var(--brand-dark)] md:text-[13px]">
-                1 de 2
+              <span className="whitespace-nowrap text-[12px] font-black text-[var(--brand-dark)] md:text-[13px]">
+                {currentQuestionIndex >= 0 ? currentQuestionIndex + 1 : 1} of {visibleQuestionSteps.length}
               </span>
             </div>
           </div>
@@ -1472,7 +1472,7 @@ export default function Home() {
           />
           <div className="flex items-center gap-2 text-[14px] font-semibold text-[#191919] md:absolute md:right-4">
             <Image
-              src="/best-money-assets/secure-call-badge.png"
+              src="/best-money-assets/secure-form-best-life2.png"
               alt="Secure Form"
               width={150}
               height={32}
