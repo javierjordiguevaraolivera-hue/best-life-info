@@ -34,6 +34,7 @@ const DISABLED_PIXEL_PATHS = new Set([
   '/trk',
   '/tab1',
   '/vidapro',
+  '/v4-rafa',
   '/web-pagos2',
 ])
 
