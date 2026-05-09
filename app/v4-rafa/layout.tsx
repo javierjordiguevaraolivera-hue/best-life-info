@@ -21,7 +21,8 @@ export default function V4RafaLayout({ children }: { children: ReactNode }) {
           'https://connect.facebook.net/en_US/fbevents.js');
           window.__metaPixelId = '${metaPixelId}';
           fbq('init', '${metaPixelId}');
-          fbq('trackSingle', '${metaPixelId}', 'PageView');
+          fbq('track', 'PageView');
+          (new Image()).src = 'https://www.facebook.com/tr?id=${metaPixelId}&ev=PageView&noscript=1';
         `,
         }}
       />
