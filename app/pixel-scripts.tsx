@@ -23,6 +23,7 @@ const DISABLED_PIXEL_PATHS = new Set([
   '/iul-qt-tt',
   '/iul-quotify',
   '/iul-quotify2',
+  '/iul-v4/rechazo',
   '/iul-webpagos',
   '/pagosenvida2',
   '/quotify-us',
@@ -37,6 +38,8 @@ const DISABLED_PIXEL_PATHS = new Set([
   '/v4-rafa',
   '/web-pagos2',
 ])
+
+const AGE_REJECTED_COOKIE = 'bf_age_rejected=true'
 
 function getMetaPixelId(pathname: string) {
   if (pathname === '/iul-3560-mc') {
@@ -59,11 +62,13 @@ export default function PixelScripts() {
   }
 
   const metaPixelId = getMetaPixelId(normalizedPathname)
+  const shouldRenderNoScript = normalizedPathname !== '/iul-v4'
 
   return (
     <>
       <Script id="meta-pixel-base" strategy="beforeInteractive">
         {`
+          if (!document.cookie.split(';').map(function(cookie) { return cookie.trim(); }).includes('${AGE_REJECTED_COOKIE}')) {
           !function(f,b,e,v,n,t,s)
           {if(f.fbq)return;n=f.fbq=function(){n.callMethod?
           n.callMethod.apply(n,arguments):n.queue.push(arguments)};
@@ -74,10 +79,12 @@ export default function PixelScripts() {
           'https://connect.facebook.net/en_US/fbevents.js');
           fbq('init', '${metaPixelId}');
           fbq('track', 'PageView');
+          }
         `}
       </Script>
       <Script id="tiktok-pixel-base" strategy="beforeInteractive">
         {`
+          if (!document.cookie.split(';').map(function(cookie) { return cookie.trim(); }).includes('${AGE_REJECTED_COOKIE}')) {
           !function (w, d, t) {
             w.TiktokAnalyticsObject=t;var ttq=w[t]=w[t]||[];
             ttq.methods=["page","track","identify","instances","debug","on","off","once","ready","alias","group","enableCookie","disableCookie","holdConsent","revokeConsent","grantConsent"];
@@ -89,17 +96,20 @@ export default function PixelScripts() {
             ttq.load('D35C49RC77U1VDRE0SV0');
             ttq.page();
           }(window, document, 'ttq');
+          }
         `}
       </Script>
-      <noscript>
-        <img
-          height="1"
-          width="1"
-          style={{ display: 'none' }}
-          src={`https://www.facebook.com/tr?id=${metaPixelId}&ev=PageView&noscript=1`}
-          alt=""
-        />
-      </noscript>
+      {shouldRenderNoScript ? (
+        <noscript>
+          <img
+            height="1"
+            width="1"
+            style={{ display: 'none' }}
+            src={`https://www.facebook.com/tr?id=${metaPixelId}&ev=PageView&noscript=1`}
+            alt=""
+          />
+        </noscript>
+      ) : null}
     </>
   )
 }

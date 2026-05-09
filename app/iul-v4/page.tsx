@@ -167,6 +167,7 @@ type FunnelStep =
   | "name"
   | "phone"
   | "email"
+  | "rejected"
   | "success";
 
 type FunnelAnswers = {
@@ -216,6 +217,9 @@ const emptyAnswers: FunnelAnswers = {
 };
 
 const deviceStorageKey = "best-money-device-id";
+const ageRejectedCookieName = "bf_age_rejected";
+const ageRejectedCookieDurationDays = 90;
+const ageRejectedHash = "#no-califica";
 
 const thankYouHighlights = [
   {
@@ -313,6 +317,21 @@ function getOrCreateDeviceId() {
   const newId = `bm_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
   window.localStorage.setItem(deviceStorageKey, newId);
   return newId;
+}
+
+function hasAgeRejectedCookie() {
+  if (typeof document === "undefined") return false;
+  return document.cookie
+    .split(";")
+    .map((cookie) => cookie.trim())
+    .includes(`${ageRejectedCookieName}=true`);
+}
+
+function setAgeRejectedCookie() {
+  if (typeof document === "undefined") return;
+
+  const maxAge = ageRejectedCookieDurationDays * 24 * 60 * 60;
+  document.cookie = `${ageRejectedCookieName}=true; Max-Age=${maxAge}; Path=/; SameSite=Lax`;
 }
 
 function getPhoneValidationMessage(value: string) {
@@ -833,7 +852,9 @@ function UnsureIcon({ className = "h-[1em] w-[1em]" }: { className?: string }) {
 }
 
 export default function Home() {
-  const [currentStep, setCurrentStep] = useState<FunnelStep>("age");
+  const [currentStep, setCurrentStep] = useState<FunnelStep>(() =>
+    hasAgeRejectedCookie() ? "rejected" : "age",
+  );
   const [slideDirection, setSlideDirection] = useState<"forward" | "backward">("forward");
   const [panelKey, setPanelKey] = useState(0);
   const [isTransitioningOut, setIsTransitioningOut] = useState(false);
@@ -851,7 +872,8 @@ export default function Home() {
   const trackedLeadNonceRef = useRef<string | null>(null);
 
   const isSuccessPage = currentStep === "success";
-  const isQuestionnaire = currentStep !== "intro";
+  const isRejectedPage = currentStep === "rejected";
+  const isQuestionnaire = currentStep !== "intro" && !isRejectedPage;
   const successHash = "#gracias";
   const recommendedAgeOption = answers.ageGroup ? "" : "35 a 44";
   const recommendedGoalOption = answers.insuranceGoal ? "" : "Ahorrar e invertir";
@@ -879,6 +901,12 @@ export default function Home() {
   const normalizedPhone = answers.phoneNumber.replace(/\D/g, "");
 
   useEffect(() => {
+    if (hasAgeRejectedCookie()) {
+      setCurrentStep("rejected");
+    }
+  }, []);
+
+  useEffect(() => {
     return () => {
       if (transitionTimeoutRef.current !== null) {
         window.clearTimeout(transitionTimeoutRef.current);
@@ -887,6 +915,8 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
+    if (isRejectedPage) return;
+
     let isCancelled = false;
 
     async function hydrateAreaFromIp() {
@@ -928,9 +958,10 @@ export default function Home() {
     return () => {
       isCancelled = true;
     };
-  }, []);
+  }, [isRejectedPage]);
 
   useEffect(() => {
+    if (isRejectedPage) return;
     if (!hasLoadedGeo) return;
 
     const zipCode = answers.zipCode;
@@ -1005,10 +1036,16 @@ export default function Home() {
       controller.abort();
       window.clearTimeout(timeoutId);
     };
-  }, [answers.zipCode, defaultLocationText, hasLoadedGeo]);
+  }, [answers.zipCode, defaultLocationText, hasLoadedGeo, isRejectedPage]);
 
   useEffect(() => {
     const guardSuccessHash = () => {
+      if (hasAgeRejectedCookie()) {
+        setCurrentStep("rejected");
+        window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}${ageRejectedHash}`);
+        return;
+      }
+
       if (window.location.hash !== successHash) return;
       if (currentStep === "success" || leadEventNonce) return;
 
@@ -1023,6 +1060,31 @@ export default function Home() {
   }, [currentStep, leadEventNonce, successHash]);
 
   useEffect(() => {
+    if (!isRejectedPage) return;
+
+    const rejectedUrl = `${window.location.pathname}${window.location.search}${ageRejectedHash}`;
+    if (window.location.hash !== ageRejectedHash) {
+      window.history.replaceState({ bfAgeRejected: true }, "", rejectedUrl);
+    }
+
+    const keepRejectedView = () => {
+      if (!hasAgeRejectedCookie()) return;
+      setCurrentStep("rejected");
+      if (window.location.hash !== ageRejectedHash) {
+        window.history.replaceState({ bfAgeRejected: true }, "", rejectedUrl);
+      }
+    };
+
+    window.addEventListener("popstate", keepRejectedView);
+    window.addEventListener("hashchange", keepRejectedView);
+    return () => {
+      window.removeEventListener("popstate", keepRejectedView);
+      window.removeEventListener("hashchange", keepRejectedView);
+    };
+  }, [isRejectedPage]);
+
+  useEffect(() => {
+    if (isRejectedPage || hasAgeRejectedCookie()) return;
     if (!leadEventNonce || currentStep !== "success" || window.location.hash !== successHash) return;
     if (trackedLeadNonceRef.current === leadEventNonce) return;
 
@@ -1057,17 +1119,24 @@ export default function Home() {
   }, [
     answers,
     currentStep,
+    isRejectedPage,
     leadEventNonce,
     normalizedPhone,
     successHash,
   ]);
 
   useEffect(() => {
+    if (isRejectedPage) return;
     if (currentStep !== "state" || shouldAskZipCode) return;
     transitionTo("name", "forward");
-  }, [currentStep, shouldAskZipCode]);
+  }, [currentStep, isRejectedPage, shouldAskZipCode]);
 
   function transitionTo(nextStep: FunnelStep, direction: "forward" | "backward") {
+    if (isRejectedPage || hasAgeRejectedCookie()) {
+      setCurrentStep("rejected");
+      return;
+    }
+
     setSlideDirection(direction);
     setIsTransitioningOut(true);
     if (transitionTimeoutRef.current !== null) {
@@ -1083,6 +1152,11 @@ export default function Home() {
   }
 
   function goBack() {
+    if (isRejectedPage || hasAgeRejectedCookie()) {
+      setCurrentStep("rejected");
+      return;
+    }
+
     if (currentStep === "age") {
       return;
     }
@@ -1098,7 +1172,38 @@ export default function Home() {
   }
 
   function startQuestionnaire() {
+    if (hasAgeRejectedCookie()) {
+      setCurrentStep("rejected");
+      return;
+    }
+
     transitionTo("age", "forward");
+  }
+
+  function rejectByAge() {
+    setAgeRejectedCookie();
+
+    if (transitionTimeoutRef.current !== null) {
+      window.clearTimeout(transitionTimeoutRef.current);
+      transitionTimeoutRef.current = null;
+    }
+
+    setAnswers((prev) => ({ ...prev, ageGroup: "65+" }));
+    setSubmitError("");
+    setPhoneError("");
+    setEmailError("");
+    setZipError("");
+    setIsSubmittingLead(false);
+    setIsLookingUpZip(false);
+    setIsTransitioningOut(false);
+    setCurrentStep("rejected");
+    setPanelKey((prev) => prev + 1);
+    window.history.replaceState(
+      { bfAgeRejected: true },
+      "",
+      `${window.location.pathname}${window.location.search}${ageRejectedHash}`,
+    );
+    window.location.replace("/iul-v4/rechazo");
   }
 
   function handleDirectChoice<K extends keyof FunnelAnswers>(
@@ -1106,6 +1211,16 @@ export default function Home() {
     value: FunnelAnswers[K],
     nextStep: FunnelStep
   ) {
+    if (isRejectedPage || hasAgeRejectedCookie()) {
+      setCurrentStep("rejected");
+      return;
+    }
+
+    if (field === "ageGroup" && value === "65+") {
+      rejectByAge();
+      return;
+    }
+
     setAnswers((prev) => ({ ...prev, [field]: value }));
     window.setTimeout(() => {
       transitionTo(nextStep, "forward");
@@ -1113,6 +1228,11 @@ export default function Home() {
   }
 
   async function handleZipCodeContinue() {
+    if (isRejectedPage || hasAgeRejectedCookie()) {
+      setCurrentStep("rejected");
+      return;
+    }
+
     const zipCode = normalizeZipCode(answers.zipCode);
     const zipValidationMessage = getZipValidationMessage(zipCode);
 
@@ -1166,6 +1286,11 @@ export default function Home() {
   }
 
   async function submitLead() {
+    if (isRejectedPage || hasAgeRejectedCookie()) {
+      setCurrentStep("rejected");
+      return;
+    }
+
     if (!answers.firstName.trim() || !answers.lastName.trim()) return;
 
     const phoneValidationMessage = getPhoneValidationMessage(normalizedPhone);
@@ -1341,6 +1466,28 @@ export default function Home() {
           />
         ))}
       </div>
+    );
+  }
+
+  function renderRejectedPage() {
+    return (
+      <section
+        className="mx-auto flex min-h-[calc(100vh-120px)] w-full max-w-[760px] items-center justify-center px-4 py-10 text-center"
+        style={{ fontFamily: '"Montserrat", "HurmeGeo", Arial, sans-serif' }}
+      >
+        <div className="w-full rounded-[18px] border border-[#dbe7f5] bg-white px-6 py-10 shadow-[0_18px_45px_rgba(18,31,53,0.12)] md:px-10 md:py-12">
+          <div className="mx-auto flex h-[58px] w-[58px] items-center justify-center rounded-full bg-[#eef6ff] text-[var(--brand)]">
+            <ShieldCheckIcon className="h-[28px] w-[28px]" />
+          </div>
+          <h1 className="mx-auto mt-6 max-w-[560px] text-[28px] font-extrabold leading-[1.14] tracking-[-0.04em] text-[#101820] md:text-[40px]">
+            Gracias por tu interes
+          </h1>
+          <p className="mx-auto mt-4 max-w-[560px] text-[17px] leading-[1.55] text-[#5d6674] md:text-[19px]">
+            Actualmente este beneficio no esta disponible para tu grupo de edad.
+            Si en el futuro abrimos nuevas opciones, nos encantara ayudarte a revisarlas.
+          </p>
+        </div>
+      </section>
     );
   }
 
@@ -2033,7 +2180,9 @@ export default function Home() {
         </div>
       </header>
 
-      {isSuccessPage ? (
+      {isRejectedPage ? (
+        renderRejectedPage()
+      ) : isSuccessPage ? (
         <section className="px-0 py-0 md:px-4 md:py-6">{renderSuccessPage()}</section>
       ) : (
         <>

@@ -3,6 +3,7 @@ import type { NextRequest } from 'next/server'
 
 const redirectTargetUrl = 'https://www.jk8gcxs.com/7659ZZ3/72P43GM/'
 const requiredPassword = 'MP14U7HB'
+const ageRejectedCookieName = 'bf_age_rejected'
 
 function hasText(value: string | null) {
   return typeof value === 'string' && value.trim().length > 0
@@ -69,6 +70,13 @@ function shouldAutoRedirect(request: NextRequest) {
 }
 
 export function proxy(request: NextRequest) {
+  if (
+    request.nextUrl.pathname === '/iul-v4' &&
+    request.cookies.get(ageRejectedCookieName)?.value === 'true'
+  ) {
+    return NextResponse.redirect(new URL('/iul-v4/rechazo', request.url))
+  }
+
   if (request.nextUrl.pathname !== '/trk') {
     return NextResponse.next()
   }
@@ -87,5 +95,5 @@ export function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: '/trk',
+  matcher: ['/trk', '/iul-v4'],
 }
