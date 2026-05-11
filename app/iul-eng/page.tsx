@@ -112,6 +112,7 @@ type FunnelStep =
   | "name"
   | "phone"
   | "email"
+  | "rejected"
   | "success";
 
 type FunnelAnswers = {
@@ -126,6 +127,14 @@ type FunnelAnswers = {
   phoneNumber: string;
   email: string;
   detectedState: string;
+};
+
+type ZipLookupResponse = {
+  location?: string | null;
+  state?: string | null;
+  zipCode?: string | null;
+  source?: "zippopotam" | "vercel-ip" | "fallback";
+  fallback?: boolean;
 };
 
 const stepOrder: FunnelStep[] = [
@@ -151,6 +160,12 @@ const emptyAnswers: FunnelAnswers = {
   email: "",
   detectedState: "",
 };
+
+const deviceStorageKey = "best-money-device-id";
+const ageRejectedCookieName = "bf_age_rejected_iul_eng";
+const ageRejectedCookieDurationDays = 90;
+const ageRejectedHash = "#no-califica";
+const blockedStateName = "New York";
 
 const thankYouHighlights = [
   {
@@ -239,6 +254,32 @@ function formatPhoneDigits(value: string) {
   return chunks.join(" ");
 }
 
+function getOrCreateDeviceId() {
+  if (typeof window === "undefined") return "";
+
+  const existing = window.localStorage.getItem(deviceStorageKey);
+  if (existing) return existing;
+
+  const newId = `bm_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+  window.localStorage.setItem(deviceStorageKey, newId);
+  return newId;
+}
+
+function hasAgeRejectedCookie() {
+  if (typeof document === "undefined") return false;
+  return document.cookie
+    .split(";")
+    .map((cookie) => cookie.trim())
+    .includes(`${ageRejectedCookieName}=true`);
+}
+
+function setAgeRejectedCookie() {
+  if (typeof document === "undefined") return;
+
+  const maxAge = ageRejectedCookieDurationDays * 24 * 60 * 60;
+  document.cookie = `${ageRejectedCookieName}=true; Max-Age=${maxAge}; Path=/; SameSite=Lax`;
+}
+
 function getPhoneValidationMessage(value: string) {
   const digits = value.replace(/\D/g, "");
 
@@ -283,6 +324,24 @@ function getZipValidationMessage(value: string) {
   }
 
   return "";
+}
+
+function isResolvedUsZip(
+  data: ZipLookupResponse | null,
+  requestedZipCode: string
+) {
+  return (
+    !!data &&
+    data.source === "zippopotam" &&
+    data.fallback === false &&
+    data.zipCode === requestedZipCode &&
+    !!data.state &&
+    stateOptions.includes(data.state)
+  );
+}
+
+function isBlockedState(state?: string | null) {
+  return state === blockedStateName;
 }
 
 function optionButtonClass(isSelected: boolean, isRecommended = false) {
@@ -639,7 +698,9 @@ function UnsureIcon({ className = "h-[1em] w-[1em]" }: { className?: string }) {
 }
 
 export default function Home() {
-  const [currentStep, setCurrentStep] = useState<FunnelStep>("age");
+  const [currentStep, setCurrentStep] = useState<FunnelStep>(() =>
+    hasAgeRejectedCookie() ? "rejected" : "age",
+  );
   const [slideDirection, setSlideDirection] = useState<"forward" | "backward">("forward");
   const [panelKey, setPanelKey] = useState(0);
   const [isTransitioningOut, setIsTransitioningOut] = useState(false);
@@ -652,7 +713,8 @@ export default function Home() {
   const transitionTimeoutRef = useRef<number | null>(null);
 
   const isSuccessPage = currentStep === "success";
-  const isQuestionnaire = currentStep !== "intro";
+  const isRejectedPage = currentStep === "rejected";
+  const isQuestionnaire = currentStep !== "intro" && !isRejectedPage;
   const successHash = "#gracias";
   const recommendedAgeOption = answers.ageGroup ? "" : "35 a 44";
   const recommendedGoalOption = answers.insuranceGoal ? "" : "Save and Invest";
@@ -676,6 +738,13 @@ export default function Home() {
   const normalizedPhone = answers.phoneNumber.replace(/\D/g, "");
 
   useEffect(() => {
+    if (hasAgeRejectedCookie()) {
+      setCurrentStep("rejected");
+      window.location.replace("/iul-eng/rechazo");
+    }
+  }, []);
+
+  useEffect(() => {
     return () => {
       if (transitionTimeoutRef.current !== null) {
         window.clearTimeout(transitionTimeoutRef.current);
@@ -685,6 +754,12 @@ export default function Home() {
 
   useEffect(() => {
     const guardSuccessHash = () => {
+      if (hasAgeRejectedCookie()) {
+        setCurrentStep("rejected");
+        window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}${ageRejectedHash}`);
+        return;
+      }
+
       if (window.location.hash !== successHash) return;
       if (currentStep === "success") return;
 
@@ -699,6 +774,12 @@ export default function Home() {
   }, [currentStep, successHash]);
 
   function transitionTo(nextStep: FunnelStep, direction: "forward" | "backward") {
+    if (isRejectedPage || hasAgeRejectedCookie()) {
+      setCurrentStep("rejected");
+      window.location.replace("/iul-eng/rechazo");
+      return;
+    }
+
     setSlideDirection(direction);
     setIsTransitioningOut(true);
     if (transitionTimeoutRef.current !== null) {
@@ -714,6 +795,11 @@ export default function Home() {
   }
 
   function goBack() {
+    if (isRejectedPage || hasAgeRejectedCookie()) {
+      setCurrentStep("rejected");
+      return;
+    }
+
     if (currentStep === "age") {
       return;
     }
@@ -729,7 +815,40 @@ export default function Home() {
   }
 
   function startQuestionnaire() {
+    if (hasAgeRejectedCookie()) {
+      setCurrentStep("rejected");
+      window.location.replace("/iul-eng/rechazo");
+      return;
+    }
+
     transitionTo("age", "forward");
+  }
+
+  function rejectLead(ageGroup?: string) {
+    setAgeRejectedCookie();
+
+    if (transitionTimeoutRef.current !== null) {
+      window.clearTimeout(transitionTimeoutRef.current);
+      transitionTimeoutRef.current = null;
+    }
+
+    if (ageGroup) {
+      setAnswers((prev) => ({ ...prev, ageGroup }));
+    }
+    setSubmitError("");
+    setPhoneError("");
+    setEmailError("");
+    setZipError("");
+    setIsFinishingFlow(false);
+    setIsTransitioningOut(false);
+    setCurrentStep("rejected");
+    setPanelKey((prev) => prev + 1);
+    window.history.replaceState(
+      { bfAgeRejected: true },
+      "",
+      `${window.location.pathname}${window.location.search}${ageRejectedHash}`,
+    );
+    window.location.replace("/iul-eng/rechazo");
   }
 
   function handleDirectChoice<K extends keyof FunnelAnswers>(
@@ -737,13 +856,28 @@ export default function Home() {
     value: FunnelAnswers[K],
     nextStep: FunnelStep
   ) {
+    if (isRejectedPage || hasAgeRejectedCookie()) {
+      setCurrentStep("rejected");
+      return;
+    }
+
+    if (field === "ageGroup" && value === "65+") {
+      rejectLead("65+");
+      return;
+    }
+
     setAnswers((prev) => ({ ...prev, [field]: value }));
     window.setTimeout(() => {
       transitionTo(nextStep, "forward");
     }, 120);
   }
 
-  function handleZipCodeContinue() {
+  async function handleZipCodeContinue() {
+    if (isRejectedPage || hasAgeRejectedCookie()) {
+      setCurrentStep("rejected");
+      return;
+    }
+
     const zipCode = normalizeZipCode(answers.zipCode);
     const zipValidationMessage = getZipValidationMessage(zipCode);
 
@@ -753,11 +887,56 @@ export default function Home() {
     }
 
     setZipError("");
-    setAnswers((prev) => ({ ...prev, zipCode }));
-    transitionTo("name", "forward");
+
+    try {
+      const response = await fetch(`/api/zip/${zipCode}`, {
+        cache: "no-store",
+      });
+
+      if (!response.ok) {
+        throw new Error("Please enter a real U.S. ZIP code.");
+      }
+
+      const data = (await response.json()) as ZipLookupResponse;
+
+      if (!isResolvedUsZip(data, zipCode)) {
+        throw new Error("Please enter a real U.S. ZIP code.");
+      }
+
+      if (isBlockedState(data.state)) {
+        rejectLead();
+        return;
+      }
+
+      setAnswers((prev) => ({
+        ...prev,
+        zipCode,
+        locationText: data.location || prev.locationText,
+        state: data.state || prev.state,
+      }));
+      transitionTo("name", "forward");
+    } catch (error) {
+      const message =
+        error instanceof Error && error.message
+          ? error.message
+          : "We could not validate that ZIP code. Please try another one.";
+
+      setAnswers((prev) => ({
+        ...prev,
+        zipCode,
+        locationText: "",
+        state: prev.detectedState || "",
+      }));
+      setZipError(message);
+    }
   }
 
-  function finishVisualFlow() {
+  async function finishVisualFlow() {
+    if (isRejectedPage || hasAgeRejectedCookie()) {
+      setCurrentStep("rejected");
+      return;
+    }
+
     if (!answers.firstName.trim() || !answers.lastName.trim()) return;
 
     const phoneValidationMessage = getPhoneValidationMessage(normalizedPhone);
@@ -776,15 +955,58 @@ export default function Home() {
     setSubmitError("");
     setIsFinishingFlow(true);
 
-    window.setTimeout(() => {
+    try {
+      if (isBlockedState(answers.state)) {
+        rejectLead();
+        return;
+      }
+
+      const cleanedAnswers = Object.fromEntries(
+        Object.entries({
+          ageGroup: answers.ageGroup,
+          insuranceGoal: answers.insuranceGoal,
+          state: answers.state,
+          firstName: answers.firstName.trim(),
+          lastName: answers.lastName.trim(),
+          phoneNumber: normalizedPhone,
+          email: answers.email.trim(),
+          locationText: answers.locationText,
+          zipCode: answers.zipCode,
+        }).filter(([, value]) => value !== "" && value != null)
+      );
+
+      const response = await fetch("/api/lead-iul-eng", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          page: "/iul-eng",
+          answers: cleanedAnswers,
+          meta: {
+            deviceId: getOrCreateDeviceId(),
+          },
+        }),
+      });
+
+      if (!response.ok) {
+        const errorBody = (await response.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(errorBody?.error || "We could not send your request right now.");
+      }
+
       window.history.replaceState(
         null,
         "",
         `${window.location.pathname}${window.location.search}${successHash}`,
       );
       transitionTo("success", "forward");
+    } catch (error) {
+      const message =
+        error instanceof Error && error.message
+          ? error.message
+          : "We could not send your request right now. Please try again.";
+      setSubmitError(message);
+    } finally {
       setIsFinishingFlow(false);
-    }, 250);
+    }
   }
 
   function renderProgress() {
@@ -1482,7 +1704,7 @@ export default function Home() {
         </div>
       </header>
 
-      {isSuccessPage ? (
+      {isRejectedPage ? null : isSuccessPage ? (
         <section className="px-0 py-0 md:px-4 md:py-6">{renderSuccessPage()}</section>
       ) : (
         <>
