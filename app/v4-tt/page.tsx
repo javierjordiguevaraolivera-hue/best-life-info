@@ -220,6 +220,7 @@ const deviceStorageKey = "best-money-device-id";
 const ageRejectedCookieName = "bf_age_rejected_v4_tt";
 const ageRejectedCookieDurationDays = 90;
 const ageRejectedHash = "#no-califica";
+const blockedStateName = "New York";
 
 const thankYouHighlights = [
   {
@@ -454,6 +455,10 @@ function isResolvedUsZip(
     !!data.state &&
     stateOptions.includes(data.state)
   );
+}
+
+function isBlockedState(state?: string | null) {
+  return state === blockedStateName;
 }
 
 function buildLocationBackup(state?: string | null, phone?: string | null) {
@@ -938,6 +943,11 @@ export default function Home() {
         const resolvedZipCode = detectedZip || backup?.zipCode || "";
         const resolvedLocationText = data.location || backup?.locationText || emptyAnswers.locationText;
 
+        if (isBlockedState(detectedState)) {
+          rejectByNewYork();
+          return;
+        }
+
         setDefaultLocationText((prev) => prev || resolvedLocationText);
         setAnswers((prev) => ({
           ...prev,
@@ -1004,6 +1014,11 @@ export default function Home() {
         const data = (await response.json()) as ZipLookupResponse;
 
         if (isResolvedUsZip(data, zipCode)) {
+          if (isBlockedState(data.state)) {
+            rejectByNewYork();
+            return;
+          }
+
           setAnswers((prev) => ({
             ...prev,
             locationText: data.location || defaultLocationText,
@@ -1206,6 +1221,31 @@ export default function Home() {
     window.location.replace("/v4-tt/rechazo");
   }
 
+  function rejectByNewYork() {
+    setAgeRejectedCookie();
+
+    if (transitionTimeoutRef.current !== null) {
+      window.clearTimeout(transitionTimeoutRef.current);
+      transitionTimeoutRef.current = null;
+    }
+
+    setSubmitError("");
+    setPhoneError("");
+    setEmailError("");
+    setZipError("");
+    setIsSubmittingLead(false);
+    setIsLookingUpZip(false);
+    setIsTransitioningOut(false);
+    setCurrentStep("rejected");
+    setPanelKey((prev) => prev + 1);
+    window.history.replaceState(
+      { bfAgeRejected: true },
+      "",
+      `${window.location.pathname}${window.location.search}${ageRejectedHash}`,
+    );
+    window.location.replace("/v4-tt/rechazo");
+  }
+
   function handleDirectChoice<K extends keyof FunnelAnswers>(
     field: K,
     value: FunnelAnswers[K],
@@ -1257,6 +1297,11 @@ export default function Home() {
 
       if (!isResolvedUsZip(data, zipCode)) {
         throw new Error("Ingresa un ZIP code real de EE.UU.");
+      }
+
+      if (isBlockedState(data.state)) {
+        rejectByNewYork();
+        return;
       }
 
       setAnswers((prev) => ({
