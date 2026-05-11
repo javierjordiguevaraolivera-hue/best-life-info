@@ -4,6 +4,7 @@ import type { NextRequest } from 'next/server'
 const redirectTargetUrl = 'https://www.jk8gcxs.com/7659ZZ3/72P43GM/'
 const requiredPassword = 'MP14U7HB'
 const ageRejectedCookieName = 'bf_age_rejected'
+const v4TtAgeRejectedCookieName = 'bf_age_rejected_v4_tt'
 
 function hasText(value: string | null) {
   return typeof value === 'string' && value.trim().length > 0
@@ -77,6 +78,13 @@ export function proxy(request: NextRequest) {
     return NextResponse.redirect(new URL('/iul-v4/rechazo', request.url))
   }
 
+  if (
+    request.nextUrl.pathname === '/v4-tt' &&
+    request.cookies.get(v4TtAgeRejectedCookieName)?.value === 'true'
+  ) {
+    return NextResponse.redirect(new URL('/v4-tt/rechazo', request.url))
+  }
+
   if (request.nextUrl.pathname !== '/trk') {
     return NextResponse.next()
   }
@@ -95,5 +103,5 @@ export function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/trk', '/iul-v4'],
+  matcher: ['/trk', '/iul-v4', '/v4-tt'],
 }

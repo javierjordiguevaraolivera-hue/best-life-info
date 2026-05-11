@@ -24,6 +24,7 @@ const DISABLED_PIXEL_PATHS = new Set([
   '/iul-quotify',
   '/iul-quotify2',
   '/iul-v4/rechazo',
+  '/v4-tt/rechazo',
   '/iul-webpagos',
   '/pagosenvida2',
   '/quotify-us',
