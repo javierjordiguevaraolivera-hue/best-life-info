@@ -47,7 +47,7 @@ function getMetaPixelId(pathname: string) {
     return '1532513301232175'
   }
 
-  if (pathname === '/iul-en-qt') {
+  if (pathname === '/iul-en-qt' || pathname === '/iul-eng') {
     return '4183928465176236'
   }
 

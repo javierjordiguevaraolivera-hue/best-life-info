@@ -9,7 +9,7 @@ function ShieldCheckIcon({ className = "h-[1em] w-[1em]" }: { className?: string
   );
 }
 
-export default function IulV4RejectedPage() {
+export default function IulEngRejectedPage() {
   return (
     <main className="min-h-screen bg-[var(--page-bg)] text-[var(--ink)]">
       <header className="border-b border-black/6 bg-white/96 shadow-[0_6px_18px_rgba(18,31,53,0.08)] backdrop-blur-sm">
@@ -34,11 +34,11 @@ export default function IulV4RejectedPage() {
             <ShieldCheckIcon className="h-[28px] w-[28px]" />
           </div>
           <h1 className="mx-auto mt-6 max-w-[560px] text-[28px] font-extrabold leading-[1.14] tracking-[-0.04em] text-[#101820] md:text-[40px]">
-            Gracias por tu interes
+            Thank you for your interest
           </h1>
           <p className="mx-auto mt-4 max-w-[560px] text-[17px] leading-[1.55] text-[#5d6674] md:text-[19px]">
-            Actualmente este beneficio no esta disponible para tu grupo de edad.
-            Si en el futuro abrimos nuevas opciones, nos encantara ayudarte a revisarlas.
+            This benefit is not available for your current profile at this time.
+            If new options become available in the future, we would be happy to help you review them.
           </p>
         </div>
       </section>
