@@ -710,7 +710,9 @@ export default function Home() {
   const [zipError, setZipError] = useState("");
   const [submitError, setSubmitError] = useState("");
   const [isFinishingFlow, setIsFinishingFlow] = useState(false);
+  const [leadEventNonce, setLeadEventNonce] = useState<string | null>(null);
   const transitionTimeoutRef = useRef<number | null>(null);
+  const trackedLeadNonceRef = useRef<string | null>(null);
 
   const isSuccessPage = currentStep === "success";
   const isRejectedPage = currentStep === "rejected";
@@ -761,7 +763,7 @@ export default function Home() {
       }
 
       if (window.location.hash !== successHash) return;
-      if (currentStep === "success") return;
+      if (currentStep === "success" || leadEventNonce) return;
 
       window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
       setCurrentStep("age");
@@ -771,7 +773,24 @@ export default function Home() {
     guardSuccessHash();
     window.addEventListener("hashchange", guardSuccessHash);
     return () => window.removeEventListener("hashchange", guardSuccessHash);
-  }, [currentStep, successHash]);
+  }, [currentStep, leadEventNonce, successHash]);
+
+  useEffect(() => {
+    if (isRejectedPage || hasAgeRejectedCookie()) return;
+    if (!leadEventNonce || currentStep !== "success" || window.location.hash !== successHash) return;
+    if (trackedLeadNonceRef.current === leadEventNonce) return;
+
+    const trackingWindow = window as Window &
+      typeof globalThis & {
+        fbq?: (...args: unknown[]) => void;
+        ttq?: { track?: (...args: unknown[]) => void };
+      };
+
+    trackedLeadNonceRef.current = leadEventNonce;
+
+    trackingWindow.fbq?.("track", "Lead");
+    trackingWindow.ttq?.track?.("CompleteRegistration");
+  }, [currentStep, isRejectedPage, leadEventNonce, successHash]);
 
   function transitionTo(nextStep: FunnelStep, direction: "forward" | "backward") {
     if (isRejectedPage || hasAgeRejectedCookie()) {
@@ -997,6 +1016,7 @@ export default function Home() {
         "",
         `${window.location.pathname}${window.location.search}${successHash}`,
       );
+      setLeadEventNonce(`${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`);
       transitionTo("success", "forward");
     } catch (error) {
       const message =
