@@ -1,12 +1,14 @@
 "use client";
 
 import Image from "next/image";
-import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
-import PopUp1 from "@/components/pop-up1";
-import { buildApplicationNumber } from "@/lib/application-number";
-import { createEventId, getUtmParams, pushGtmEvent, trackVercelIulV4VirtualPage } from "@/lib/gtm-events";
 import { inferUsZipFromStateAndPhone } from "@/lib/infer-us-zip";
+
+const trustBadges = [
+  { icon: "/best-money-assets/tax-free.svg", text: "Retiro libre de impuestos" },
+  { icon: "/best-money-assets/family-protection.svg", text: "Protege a tu familia" },
+  { icon: "/best-money-assets/minutes.svg", text: "Toma menos de 2 minutos" },
+];
 
 const questionnaireSecuritySeals = [
   {
@@ -57,6 +59,34 @@ const introBenefits = [
   },
 ];
 
+const howItWorksSteps = [
+  { number: "1", title: "Te hacemos unas preguntas", description: "para verificar si calificas." },
+  { number: "2", title: "Revisamos tu perfil", description: "y estimamos tu beneficio IUL." },
+  { number: "3", title: "Accede a tu plan", description: "y recibe tu beneficio." },
+];
+
+const metrics = [
+  { value: "73,698", label: "Familias ayudadas en 2026" },
+  { value: "100%", label: "Beneficio familiar protegido" },
+  { value: "$200K+", label: "Potencial en valor acumulado" },
+];
+
+const footerLinks = [
+  { label: "About Us", href: "https://www.bestmoney.com/" },
+  { label: "Cookie Policy", href: "https://www.bestmoney.com/privacy-policy" },
+  { label: "Terms Of Use", href: "https://www.bestmoney.com/terms-of-use" },
+  { label: "Partner With Us", href: "https://www.bestmoney.com/" },
+  { label: "Privacy Policy", href: "https://www.bestmoney.com/privacy-policy" },
+  { label: "Contact", href: "https://www.bestmoney.com/" },
+  { label: "Sitemap", href: "https://www.bestmoney.com/" },
+];
+
+const socialLinks = [
+  { label: "Facebook", href: "https://www.facebook.com/BestMoneyCom", icon: "/best-money-assets/facebook.png" },
+  { label: "Instagram", href: "https://www.instagram.com/", icon: "/best-money-assets/instagram.png" },
+  { label: "LinkedIn", href: "https://www.linkedin.com/company/bestmoney-com/", icon: "/best-money-assets/linkedin.png" },
+];
+
 const ageOptions = ["25 a 34", "35 a 44", "45 a 54", "55 a 65", "65+"];
 const goalOptions = [
   "Seguro de vida",
@@ -74,7 +104,8 @@ const stateOptions = [
   "South Carolina", "South Dakota", "Tennessee", "Texas", "Utah", "Vermont",
   "Virginia", "Washington", "West Virginia", "Wisconsin", "Wyoming", "District of Columbia",
 ];
-const stateAbbreviations: Record<string, string> = {
+
+const metaStateCodes: Record<string, string> = {
   Alabama: "al",
   Alaska: "ak",
   Arizona: "az",
@@ -153,22 +184,12 @@ type FunnelAnswers = {
   detectedState: string;
 };
 
-type PhoneValidationStatus = "idle" | "validating" | "valid" | "invalid";
-
 type ZipLookupResponse = {
   location?: string | null;
   state?: string | null;
   zipCode?: string | null;
   source?: "zippopotam" | "vercel-ip" | "fallback";
   fallback?: boolean;
-};
-
-type RuntimeConfig = {
-  payPerCallStatus: string;
-  payPerCallStartTime: string;
-  payPerCallEndTime: string;
-  payPerCallPhoneNumber: string;
-  ringbaCampaignId: string;
 };
 
 const stepOrder: FunnelStep[] = [
@@ -195,18 +216,7 @@ const emptyAnswers: FunnelAnswers = {
   detectedState: "",
 };
 
-const deviceStorageKey = "best-life-iul-v4-new-device-id";
-const deviceCookieName = "bf_iul_device_id";
-const trustedFormScriptId = "trustedform-certify-sdk";
-const trustedFormFieldName = process.env.NEXT_PUBLIC_TRUSTEDFORM_FIELD || "xxTrustedFormCertUrl";
-const defaultRuntimeConfig = {
-  payPerCallStatus: "OFF",
-  payPerCallStartTime: "",
-  payPerCallEndTime: "",
-  payPerCallPhoneNumber: "",
-  ringbaCampaignId: "",
-};
-const deviceCookieDurationDays = 15;
+const deviceStorageKey = "best-money-device-id";
 const ageRejectedCookieName = "bf_age_rejected";
 const ageRejectedCookieDurationDays = 90;
 const ageRejectedHash = "#no-califica";
@@ -291,7 +301,7 @@ const thankYouFaqs = [
 ];
 
 function formatPhoneDigits(value: string) {
-  const digits = normalizeUsPhoneInput(value);
+  const digits = value.replace(/\D/g, "").slice(0, 10);
   const chunks = [];
   if (digits.length > 0) chunks.push(digits.slice(0, 3));
   if (digits.length > 3) chunks.push(digits.slice(3, 6));
@@ -299,47 +309,15 @@ function formatPhoneDigits(value: string) {
   return chunks.join(" ");
 }
 
-function normalizeUsPhoneInput(value: string) {
-  const digits = value.replace(/\D/g, "");
-
-  if (digits.length === 11 && digits.startsWith("1")) {
-    return digits.slice(1);
-  }
-
-  if (digits.length > 10 && digits.startsWith("1")) {
-    return digits.slice(1, 11);
-  }
-
-  return digits.slice(0, 10);
-}
-
 function getOrCreateDeviceId() {
   if (typeof window === "undefined") return "";
 
   const existing = window.localStorage.getItem(deviceStorageKey);
-  if (existing) {
-    setDeviceCookie(existing);
-    return existing;
-  }
+  if (existing) return existing;
 
   const newId = `bm_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
   window.localStorage.setItem(deviceStorageKey, newId);
-  setDeviceCookie(newId);
   return newId;
-}
-
-function getTrustedFormCertUrl() {
-  if (typeof document === "undefined") return "";
-
-  const field = document.getElementsByName(trustedFormFieldName)[0] as HTMLInputElement | undefined;
-  return field?.value?.trim() || "";
-}
-
-function setDeviceCookie(deviceId: string) {
-  if (typeof document === "undefined" || !deviceId) return;
-
-  const maxAge = deviceCookieDurationDays * 24 * 60 * 60;
-  document.cookie = `${deviceCookieName}=${encodeURIComponent(deviceId)}; Max-Age=${maxAge}; Path=/; SameSite=Lax`;
 }
 
 function hasAgeRejectedCookie() {
@@ -358,7 +336,7 @@ function setAgeRejectedCookie() {
 }
 
 function getPhoneValidationMessage(value: string) {
-  const digits = normalizeUsPhoneInput(value);
+  const digits = value.replace(/\D/g, "");
 
   if (digits.length !== 10) {
     return "Ingresa un número válido de EE.UU. con 10 dígitos.";
@@ -367,8 +345,6 @@ function getPhoneValidationMessage(value: string) {
   if (!/^[2-9]\d{2}[2-9]\d{6}$/.test(digits)) {
     return "Ingresa un número real de EE.UU.";
   }
-
-  return "";
 
   if (
     digits === "0123456789" ||
@@ -389,6 +365,68 @@ function getPhoneValidationMessage(value: string) {
 
 function isValidEmail(value: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+}
+
+function extractCityFromLocation(locationText: string) {
+  const normalized = locationText.trim();
+  if (!normalized) return "";
+  if (normalized.toLowerCase() === "rates available for your area") return "";
+  const [cityPart] = normalized.split(",");
+  const city = cityPart?.trim() || "";
+  if (!city) return "";
+  if (/area|rates available/i.test(city)) return "";
+  return city;
+}
+
+function normalizeMetaText(value: string) {
+  return value
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+}
+
+function normalizeMetaName(value: string) {
+  return normalizeMetaText(value).replace(/[^a-z]/g, "");
+}
+
+function normalizeMetaCity(value: string) {
+  return normalizeMetaText(value).replace(/[^a-z]/g, "");
+}
+
+function normalizeMetaEmail(value: string) {
+  return value.trim().toLowerCase();
+}
+
+function normalizeMetaPhone(value: string) {
+  const digits = value.replace(/\D/g, "");
+
+  if (digits.length === 10) {
+    return `1${digits}`;
+  }
+
+  if (digits.length === 11 && digits.startsWith("1")) {
+    return digits;
+  }
+
+  return digits;
+}
+
+function getAgeRangeMidpoint(ageGroup: string) {
+  switch (ageGroup) {
+    case "25 a 34":
+      return 30;
+    case "35 a 44":
+      return 40;
+    case "45 a 54":
+      return 50;
+    case "55 a 65":
+      return 60;
+    case "65+":
+      return 65;
+    default:
+      return undefined;
+  }
 }
 
 function normalizeZipCode(value: string) {
@@ -430,6 +468,47 @@ function buildLocationBackup(state?: string | null, phone?: string | null) {
     locationText: inferred.location,
     state: inferred.state || state || "",
   };
+}
+
+function buildMetaLeadTrackingData(args: {
+  answers: FunnelAnswers;
+  normalizedPhone: string;
+  deviceId: string;
+}) {
+  const stateName = args.answers.state || args.answers.detectedState;
+  const stateCode = metaStateCodes[stateName] || "";
+  const city = extractCityFromLocation(args.answers.locationText);
+  const zipCode = args.answers.zipCode.trim();
+  const userData = Object.fromEntries(
+    Object.entries({
+      em: normalizeMetaEmail(args.answers.email),
+      ph: normalizeMetaPhone(args.normalizedPhone),
+      fn: normalizeMetaName(args.answers.firstName),
+      ln: normalizeMetaName(args.answers.lastName),
+      ct: city ? normalizeMetaCity(city) : "",
+      st: stateCode,
+      zp: zipCode,
+      country: "us",
+      external_id: args.deviceId.trim().toLowerCase(),
+    }).filter(([, value]) => value)
+  );
+
+  const customData = Object.fromEntries(
+    Object.entries({
+      content_name: "iul_v4_lead",
+      lead_type: "iul",
+      status: "submitted",
+      age_range: args.answers.ageGroup,
+      age_range_midpoint: getAgeRangeMidpoint(args.answers.ageGroup),
+      insurance_goal: args.answers.insuranceGoal,
+      state: stateCode || stateName || undefined,
+      city: city || undefined,
+      zip_code: zipCode || undefined,
+      country: "us",
+    }).filter(([, value]) => value !== "" && value != null)
+  );
+
+  return { userData, customData };
 }
 
 function optionButtonClass(isSelected: boolean, isRecommended = false) {
@@ -647,6 +726,61 @@ function QuestionIcon({ className = "h-[1em] w-[1em]" }: { className?: string })
   );
 }
 
+function IntroBenefitIcon({
+  icon,
+  className = "h-[26px] w-[26px]",
+}: {
+  icon: (typeof introBenefits)[number]["icon"];
+  className?: string;
+}) {
+  if (icon === "growth") {
+    return (
+      <svg aria-hidden="true" viewBox="0 0 24 24" className={className} fill="none">
+        <rect x="3.5" y="4.5" width="17" height="15" rx="3" fill="#ece7ff" />
+        <path d="M6.5 16.5 10 13l2.4 2.2 5.1-5.2" stroke="#3b82f6" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" />
+        <path d="M6.5 7.5v9M11.5 7.5v9M16.5 7.5v9" stroke="#c4b5fd" strokeWidth="1.2" strokeLinecap="round" />
+      </svg>
+    );
+  }
+
+  if (icon === "tax") {
+    return (
+      <svg aria-hidden="true" viewBox="0 0 24 24" className={className} fill="none">
+        <circle cx="12" cy="12" r="7.8" stroke="#ff4d67" strokeWidth="2.2" />
+        <path d="M7 7 17 17" stroke="#ff4d67" strokeWidth="2.2" strokeLinecap="round" />
+      </svg>
+    );
+  }
+
+  if (icon === "liquidity") {
+    return (
+      <svg aria-hidden="true" viewBox="0 0 24 24" className={className} fill="none">
+        <path d="M4 9.3 12 4l8 5.3" stroke="#8b7aa8" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+        <path d="M5.5 10h13" stroke="#8b7aa8" strokeWidth="1.7" strokeLinecap="round" />
+        <path d="M7.2 10v7.3M12 10v7.3M16.8 10v7.3" stroke="#8b7aa8" strokeWidth="1.7" strokeLinecap="round" />
+        <path d="M4.5 18h15" stroke="#8b7aa8" strokeWidth="1.7" strokeLinecap="round" />
+      </svg>
+    );
+  }
+
+  if (icon === "protection") {
+    return (
+      <svg aria-hidden="true" viewBox="0 0 24 24" className={className} fill="none">
+        <path d="M12 3.8c2.8 1.9 5.8 2.4 8 2.5v6c0 4.5-3.2 7.9-8 9.5-4.8-1.6-8-5-8-9.5v-6c2.2-.1 5.2-.6 8-2.5Z" fill="#5bb2ff" stroke="#4477e6" strokeWidth="1.5" />
+      </svg>
+    );
+  }
+
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24" className={className} fill="none">
+      <rect x="5" y="4.5" width="14" height="15" rx="2.5" fill="#f2e8ff" />
+      <path d="M12 7.2v5.4M9.3 9.9h5.4" stroke="#ff4db8" strokeWidth="1.8" strokeLinecap="round" />
+      <path d="M8.5 15.8h7" stroke="#c084fc" strokeWidth="1.6" strokeLinecap="round" />
+      <path d="M8.5 18.2h5.2" stroke="#c084fc" strokeWidth="1.6" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 function PhonePadIcon({ className = "h-[1em] w-[1em]" }: { className?: string }) {
   return (
     <svg aria-hidden="true" viewBox="0 0 24 24" className={className} fill="none">
@@ -722,108 +856,11 @@ function UnsureIcon({ className = "h-[1em] w-[1em]" }: { className?: string }) {
   );
 }
 
-function PhoneStatusIcon({ status }: { status: PhoneValidationStatus }) {
-  if (status === "validating") {
-    return (
-      <svg
-        aria-hidden="true"
-        viewBox="0 0 24 24"
-        className="h-[18px] w-[18px] animate-spin text-[#94a3b8]"
-        fill="none"
-      >
-        <circle cx="12" cy="12" r="8" stroke="currentColor" strokeWidth="3" opacity="0.24" />
-        <path d="M20 12a8 8 0 0 0-8-8" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
-      </svg>
-    );
-  }
-
-  if (status === "valid") {
-    return (
-      <svg
-        aria-hidden="true"
-        viewBox="0 0 24 24"
-        className="h-[20px] w-[20px] text-[#16a34a]"
-        fill="none"
-      >
-        <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2" />
-        <path d="m7.8 12.2 2.6 2.6 5.8-6" stroke="currentColor" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round" />
-      </svg>
-    );
-  }
-
-  if (status === "invalid") {
-    return (
-      <svg
-        aria-hidden="true"
-        viewBox="0 0 24 24"
-        className="h-[20px] w-[20px] text-[#dc2626]"
-        fill="none"
-      >
-        <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2" />
-        <path d="m8.5 8.5 7 7M15.5 8.5l-7 7" stroke="currentColor" strokeWidth="2.3" strokeLinecap="round" />
-      </svg>
-    );
-  }
-
-  return null;
-}
-
-function parseTimeToMinutes(value: string) {
-  if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(value)) return null;
-
-  const [hours, minutes] = value.split(":").map(Number);
-  return hours * 60 + minutes;
-}
-
-function getNewYorkMinutes() {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/New_York",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  }).formatToParts(new Date());
-  const hour = Number(parts.find((part) => part.type === "hour")?.value);
-  const minute = Number(parts.find((part) => part.type === "minute")?.value);
-
-  if (!Number.isFinite(hour) || !Number.isFinite(minute)) return null;
-
-  return hour * 60 + minute;
-}
-
-function isWithinTimeWindow(current: number, start: number, end: number) {
-  if (start === end) return true;
-  if (start < end) return current >= start && current < end;
-  return current >= start || current < end;
-}
-
-function isPayPerCallWindowOpen(config: RuntimeConfig) {
-  if (config.payPerCallStatus !== "ON") return false;
-
-  const start = parseTimeToMinutes(config.payPerCallStartTime);
-  const end = parseTimeToMinutes(config.payPerCallEndTime);
-  const current = getNewYorkMinutes();
-
-  if (start == null || end == null || current == null) return false;
-
-  return isWithinTimeWindow(current, start, end);
-}
-
-function lowerGtmValue(value?: string | null) {
-  const normalized = String(value || "").trim().toLowerCase();
-  return normalized || undefined;
-}
-
-function getGtmState(value?: string | null) {
-  const state = String(value || "").trim();
-  if (/^[A-Za-z]{2}$/.test(state)) return state.toLowerCase();
-  return stateAbbreviations[state] || lowerGtmValue(state);
-}
-
 export default function Home() {
   const [currentStep, setCurrentStep] = useState<FunnelStep>(() =>
     hasAgeRejectedCookie() ? "rejected" : "age",
   );
-  const [, setSlideDirection] = useState<"forward" | "backward">("forward");
+  const [slideDirection, setSlideDirection] = useState<"forward" | "backward">("forward");
   const [panelKey, setPanelKey] = useState(0);
   const [isTransitioningOut, setIsTransitioningOut] = useState(false);
   const [answers, setAnswers] = useState<FunnelAnswers>(emptyAnswers);
@@ -835,21 +872,9 @@ export default function Home() {
   const [zipError, setZipError] = useState("");
   const [submitError, setSubmitError] = useState("");
   const [isSubmittingLead, setIsSubmittingLead] = useState(false);
-  const [isPhoneValidating, setIsPhoneValidating] = useState(false);
-  const [hasBlurredPhone, setHasBlurredPhone] = useState(false);
-  const [leadToken, setLeadToken] = useState("");
-  const [isPayPerCallPopupOpen, setIsPayPerCallPopupOpen] = useState(false);
-  const [submittedLeadId, setSubmittedLeadId] = useState("");
-  const [submittedContinueUrl, setSubmittedContinueUrl] = useState("");
-  const [submittedFirstName, setSubmittedFirstName] = useState("");
-  const [submittedInsuranceGoal, setSubmittedInsuranceGoal] = useState("");
-  const [runtimeConfig, setRuntimeConfig] = useState<RuntimeConfig>(defaultRuntimeConfig);
+  const [leadEventNonce, setLeadEventNonce] = useState<string | null>(null);
   const transitionTimeoutRef = useRef<number | null>(null);
-  const phoneValidationTimeoutRef = useRef<number | null>(null);
-  const trackedStepsRef = useRef<Set<string>>(new Set());
-  const trackedAutoZipRef = useRef(false);
-  const submittedLeadRef = useRef(false);
-  const runtimeConfigRef = useRef<RuntimeConfig>(defaultRuntimeConfig);
+  const trackedLeadNonceRef = useRef<string | null>(null);
 
   const isSuccessPage = currentStep === "success";
   const isRejectedPage = currentStep === "rejected";
@@ -878,51 +903,7 @@ export default function Home() {
     ? "animate-[survey-question-out_0.18s_cubic-bezier(0.4,0,1,1)_forwards]"
     : "animate-[survey-question-in_0.42s_cubic-bezier(0.22,0.61,0.36,1)]";
 
-  const normalizedPhone = normalizeUsPhoneInput(answers.phoneNumber);
-  const shouldShowPhoneValidation = normalizedPhone.length >= 10 || (hasBlurredPhone && normalizedPhone.length > 0);
-  const livePhoneValidationMessage = shouldShowPhoneValidation
-    ? getPhoneValidationMessage(normalizedPhone)
-    : "";
-  const phoneValidationStatus: PhoneValidationStatus = !shouldShowPhoneValidation
-    ? "idle"
-    : isPhoneValidating
-      ? "validating"
-      : livePhoneValidationMessage
-        ? "invalid"
-        : "valid";
-  const phoneBorderClass =
-    phoneValidationStatus === "invalid" || phoneError
-      ? "border-[#e11d48] focus:border-[#e11d48]"
-      : phoneValidationStatus === "valid"
-        ? "border-[#16a34a] focus:border-[#16a34a]"
-        : "border-[#9c9c9c] focus:border-[var(--brand)]";
-  const visiblePhoneError =
-    phoneValidationStatus === "validating"
-      ? ""
-      : phoneError || (phoneValidationStatus === "invalid" ? livePhoneValidationMessage : "");
-
-  function getGtmLeadPayload() {
-    const location = answers.locationText || defaultLocationText || "";
-    const city = location.split(",")[0]?.trim() || "";
-    const state = answers.state || answers.detectedState;
-
-    return {
-      funnel_id: "iul-v4",
-      step: currentStep,
-      country: "us",
-      state: getGtmState(state),
-      zip_code: answers.zipCode || undefined,
-      city: lowerGtmValue(city),
-      location: lowerGtmValue(location),
-      age_group: lowerGtmValue(answers.ageGroup),
-      insurance_goal: lowerGtmValue(answers.insuranceGoal),
-      first_name: lowerGtmValue(answers.firstName),
-      last_name: lowerGtmValue(answers.lastName),
-      phone_number: normalizedPhone || undefined,
-      email: lowerGtmValue(answers.email),
-      ...getUtmParams(),
-    };
-  }
+  const normalizedPhone = answers.phoneNumber.replace(/\D/g, "");
 
   useEffect(() => {
     if (hasAgeRejectedCookie()) {
@@ -931,114 +912,11 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    let isMounted = true;
-
-    async function loadRuntimeConfig() {
-      try {
-        const response = await fetch("/api/runtime-config", { cache: "no-store" });
-        if (!response.ok) return;
-
-        const config = (await response.json()) as Partial<RuntimeConfig>;
-        const nextConfig = {
-          ...defaultRuntimeConfig,
-          ...Object.fromEntries(
-            Object.entries(config).filter(([, value]) => typeof value === "string" && value.trim()),
-          ),
-        } as RuntimeConfig;
-
-        if (!isMounted) return;
-        runtimeConfigRef.current = nextConfig;
-        setRuntimeConfig(nextConfig);
-      } catch {
-        // Keep deploy-time fallbacks if runtime config is temporarily unavailable.
-      }
-    }
-
-    void loadRuntimeConfig();
-
-    return () => {
-      isMounted = false;
-    };
-  }, []);
-
-  useEffect(() => {
     return () => {
       if (transitionTimeoutRef.current !== null) {
         window.clearTimeout(transitionTimeoutRef.current);
       }
-      if (phoneValidationTimeoutRef.current !== null) {
-        window.clearTimeout(phoneValidationTimeoutRef.current);
-      }
     };
-  }, []);
-
-  useEffect(() => {
-    if (phoneValidationTimeoutRef.current !== null) {
-      window.clearTimeout(phoneValidationTimeoutRef.current);
-      phoneValidationTimeoutRef.current = null;
-    }
-
-    if (!shouldShowPhoneValidation) {
-      setIsPhoneValidating(false);
-      setPhoneError("");
-      return;
-    }
-
-    setIsPhoneValidating(true);
-    phoneValidationTimeoutRef.current = window.setTimeout(() => {
-      phoneValidationTimeoutRef.current = null;
-      setIsPhoneValidating(false);
-      setPhoneError(getPhoneValidationMessage(normalizedPhone));
-    }, 420);
-
-    return () => {
-      if (phoneValidationTimeoutRef.current !== null) {
-        window.clearTimeout(phoneValidationTimeoutRef.current);
-        phoneValidationTimeoutRef.current = null;
-      }
-    };
-  }, [normalizedPhone, shouldShowPhoneValidation]);
-
-  useEffect(() => {
-    if (isRejectedPage || currentQuestionIndex < 0) return;
-
-    const trackingKey = `${currentQuestionIndex}:${currentStep}`;
-    if (trackedStepsRef.current.has(trackingKey)) return;
-
-    trackedStepsRef.current.add(trackingKey);
-    pushGtmEvent(currentQuestionIndex === 0 ? "PageView" : "ViewContent", {
-      ...getGtmLeadPayload(),
-      event_id: createEventId(currentQuestionIndex === 0 ? "pageview" : "viewcontent"),
-      step_number: currentQuestionIndex + 1,
-    });
-  }, [
-    currentQuestionIndex,
-    currentStep,
-    isRejectedPage,
-    answers.state,
-    answers.detectedState,
-    answers.zipCode,
-    answers.ageGroup,
-    answers.insuranceGoal,
-    answers.firstName,
-    answers.lastName,
-    answers.email,
-    normalizedPhone,
-  ]);
-
-  useEffect(() => {
-    if (document.getElementById(trustedFormScriptId)) return;
-
-    const trustedFormScript = document.createElement("script");
-    trustedFormScript.id = trustedFormScriptId;
-    trustedFormScript.type = "text/javascript";
-    trustedFormScript.async = true;
-    trustedFormScript.src = `${window.location.protocol}//api.trustedform.com/trustedform.js?field=${encodeURIComponent(
-      trustedFormFieldName,
-    )}&use_tagged_consent=true&l=${Date.now()}${Math.random()}`;
-
-    const firstScript = document.getElementsByTagName("script")[0];
-    firstScript?.parentNode?.insertBefore(trustedFormScript, firstScript);
   }, []);
 
   useEffect(() => {
@@ -1184,7 +1062,7 @@ export default function Home() {
       }
 
       if (window.location.hash !== successHash) return;
-      if (currentStep === "success") return;
+      if (currentStep === "success" || leadEventNonce) return;
 
       window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
       setCurrentStep("age");
@@ -1194,7 +1072,7 @@ export default function Home() {
     guardSuccessHash();
     window.addEventListener("hashchange", guardSuccessHash);
     return () => window.removeEventListener("hashchange", guardSuccessHash);
-  }, [currentStep, successHash]);
+  }, [currentStep, leadEventNonce, successHash]);
 
   useEffect(() => {
     if (!isRejectedPage) return;
@@ -1221,21 +1099,52 @@ export default function Home() {
   }, [isRejectedPage]);
 
   useEffect(() => {
+    if (isRejectedPage || hasAgeRejectedCookie()) return;
+    if (!leadEventNonce || currentStep !== "success" || window.location.hash !== successHash) return;
+    if (trackedLeadNonceRef.current === leadEventNonce) return;
+
+    const trackingWindow = window as Window &
+      typeof globalThis & {
+        fbq?: (...args: unknown[]) => void;
+        ttq?: { track?: (...args: unknown[]) => void };
+        __metaPixelId?: string;
+      };
+
+    trackedLeadNonceRef.current = leadEventNonce;
+
+    try {
+      const metaPixelId = trackingWindow.__metaPixelId || "980723860687387";
+      const deviceId = getOrCreateDeviceId();
+      const { userData, customData } = buildMetaLeadTrackingData({
+        answers,
+        normalizedPhone,
+        deviceId,
+      });
+
+      if (Object.keys(userData).length > 0) {
+        trackingWindow.fbq?.("init", metaPixelId, userData);
+      }
+
+      trackingWindow.fbq?.("track", "Lead", customData);
+    } catch {
+      trackingWindow.fbq?.("track", "Lead");
+    } finally {
+      trackingWindow.ttq?.track?.("CompleteRegistration");
+    }
+  }, [
+    answers,
+    currentStep,
+    isRejectedPage,
+    leadEventNonce,
+    normalizedPhone,
+    successHash,
+  ]);
+
+  useEffect(() => {
     if (isRejectedPage) return;
     if (currentStep !== "state" || shouldAskZipCode) return;
-    if (!trackedAutoZipRef.current) {
-      trackedAutoZipRef.current = true;
-      trackVercelIulV4VirtualPage("v4_step3_zip", {
-        step: "state",
-        step_number: 3,
-        zip_detected: true,
-        country: "us",
-        state: getGtmState(resolvedUsState || detectedUsState),
-        zip_code: answers.zipCode || undefined,
-      });
-    }
     transitionTo("name", "forward");
-  }, [answers.zipCode, currentStep, detectedUsState, isRejectedPage, resolvedUsState, shouldAskZipCode]);
+  }, [currentStep, isRejectedPage, shouldAskZipCode]);
 
   function transitionTo(nextStep: FunnelStep, direction: "forward" | "backward") {
     if (isRejectedPage || hasAgeRejectedCookie()) {
@@ -1309,7 +1218,7 @@ export default function Home() {
       "",
       `${window.location.pathname}${window.location.search}${ageRejectedHash}`,
     );
-    window.location.replace("/iul-v4-new/rechazo");
+    window.location.replace("/iul-v4-legacy/rechazo");
   }
 
   function rejectByNewYork() {
@@ -1334,7 +1243,7 @@ export default function Home() {
       "",
       `${window.location.pathname}${window.location.search}${ageRejectedHash}`,
     );
-    window.location.replace("/iul-v4-new/rechazo");
+    window.location.replace("/iul-v4-legacy/rechazo");
   }
 
   function handleDirectChoice<K extends keyof FunnelAnswers>(
@@ -1350,18 +1259,6 @@ export default function Home() {
     if (field === "ageGroup" && value === "65+") {
       rejectByAge();
       return;
-    }
-
-    if (field === "insuranceGoal" && nextStep === "name" && !trackedAutoZipRef.current) {
-      trackedAutoZipRef.current = true;
-      trackVercelIulV4VirtualPage("v4_step3_zip", {
-        step: "state",
-        step_number: 3,
-        zip_detected: true,
-        country: "us",
-        state: getGtmState(resolvedUsState || detectedUsState),
-        zip_code: answers.zipCode || undefined,
-      });
     }
 
     setAnswers((prev) => ({ ...prev, [field]: value }));
@@ -1433,43 +1330,6 @@ export default function Home() {
     }
   }
 
-  async function prepareLeadToken() {
-    if (leadToken) return leadToken;
-
-    const tokenResponse = await fetch("/api/lead-token", { cache: "no-store" });
-
-    if (!tokenResponse.ok) {
-      throw new Error("No pudimos preparar el envio seguro. Intenta nuevamente.");
-    }
-
-    const tokenBody = (await tokenResponse.json().catch(() => null)) as { token?: string } | null;
-    const nextLeadToken = tokenBody?.token;
-
-    if (!nextLeadToken) {
-      throw new Error("No pudimos preparar el envio seguro. Intenta nuevamente.");
-    }
-
-    setLeadToken(nextLeadToken);
-    return nextLeadToken;
-  }
-
-  async function handleNameContinue() {
-    if (!answers.firstName.trim() || !answers.lastName.trim()) return;
-
-    setSubmitError("");
-    transitionTo("phone", "forward");
-
-    try {
-      await prepareLeadToken();
-    } catch (error) {
-      const message =
-        error instanceof Error && error.message
-          ? error.message
-          : "No pudimos preparar el envio seguro. Intenta nuevamente.";
-      setSubmitError(message);
-    }
-  }
-
   async function submitLead() {
     if (isRejectedPage || hasAgeRejectedCookie()) {
       setCurrentStep("rejected");
@@ -1492,23 +1352,6 @@ export default function Home() {
     setPhoneError("");
     setEmailError("");
     setSubmitError("");
-
-    if (submittedLeadRef.current || submittedLeadId) {
-      if (isPayPerCallWindowOpen(runtimeConfigRef.current)) {
-        setIsPayPerCallPopupOpen(true);
-        return;
-      }
-
-      const fallbackParams = new URLSearchParams(window.location.search);
-      fallbackParams.set("funnel_id", "iul-v4");
-      if (submittedLeadId) {
-        fallbackParams.set("lead_id", submittedLeadId);
-      }
-      const fallbackSearch = fallbackParams.toString() ? `?${fallbackParams.toString()}` : "";
-      window.location.assign(`/thanks/lead${fallbackSearch}`);
-      return;
-    }
-
     setIsSubmittingLead(true);
 
     try {
@@ -1599,9 +1442,6 @@ export default function Home() {
 
       setAnswers(completedAnswers);
 
-      const urlParams = new URLSearchParams(window.location.search);
-      const sub1 = urlParams.get("sub1")?.trim() || "";
-      const sub2 = urlParams.get("sub2")?.trim() || "";
       const cleanedAnswers = Object.fromEntries(
         Object.entries({
           ageGroup: completedAnswers.ageGroup,
@@ -1613,27 +1453,17 @@ export default function Home() {
           email: completedAnswers.email.trim(),
           locationText: completedAnswers.locationText,
           zipCode: completedAnswers.zipCode,
-          sub1,
-          sub2,
         }).filter(([, value]) => value !== "" && value != null)
       );
-      const preparedLeadToken = await prepareLeadToken();
-      const activeRuntimeConfig = runtimeConfigRef.current;
-      const shouldUsePayPerCallThankYou = isPayPerCallWindowOpen(activeRuntimeConfig);
 
-      const response = await fetch("/api/lead-iul-v4-new", {
+      const response = await fetch("/api/lead-iul-v4-legacy", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-lead-token": preparedLeadToken,
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          page: "/iul-v4-new",
+          page: "/iul-v4-legacy",
           answers: cleanedAnswers,
           meta: {
             deviceId: getOrCreateDeviceId(),
-            trustedFormCertUrl: getTrustedFormCertUrl(),
-            salePath: shouldUsePayPerCallThankYou ? "call" : "lead",
           },
         }),
       });
@@ -1643,53 +1473,13 @@ export default function Home() {
         throw new Error(errorBody?.error || "No pudimos enviar tu solicitud ahora mismo.");
       }
 
-      const responseBody = (await response.json().catch(() => null)) as {
-        leadId?: string;
-      } | null;
-      const leadId = responseBody?.leadId;
-      submittedLeadRef.current = true;
-      const leadEventId = createEventId("lead");
-      const nextParams = new URLSearchParams(window.location.search);
-      nextParams.set("funnel_id", "iul-v4");
-      if (leadId) {
-        nextParams.set("lead_id", leadId);
-      }
-      nextParams.set("first_name", completedAnswers.firstName.trim());
-      nextParams.set("insurance_goal", completedAnswers.insuranceGoal);
-      nextParams.set("application_number", buildApplicationNumber(leadId));
-      if (activeRuntimeConfig.payPerCallPhoneNumber) {
-        nextParams.set("ppc_phone", activeRuntimeConfig.payPerCallPhoneNumber);
-      }
-      if (activeRuntimeConfig.ringbaCampaignId) {
-        nextParams.set("ringba_campaign_id", activeRuntimeConfig.ringbaCampaignId);
-      }
-
-      const nextSearch = nextParams.toString() ? `?${nextParams.toString()}` : "";
-
-      pushGtmEvent("Lead", {
-        ...getGtmLeadPayload(),
-        event_id: leadEventId,
-        lead_id: leadId,
-        external_id: leadId,
-      });
-
       window.history.replaceState(
         null,
         "",
-        `${window.location.pathname}${nextSearch}${successHash}`,
+        `${window.location.pathname}${window.location.search}${successHash}`,
       );
-      setLeadToken("");
-
-      if (shouldUsePayPerCallThankYou) {
-        setSubmittedLeadId(leadId || "");
-        setSubmittedFirstName(completedAnswers.firstName.trim());
-        setSubmittedInsuranceGoal(completedAnswers.insuranceGoal);
-        setSubmittedContinueUrl(`/thanks/call2${nextSearch}`);
-        setIsPayPerCallPopupOpen(true);
-        return;
-      }
-
-      window.location.assign(`/thanks/lead${nextSearch}`);
+      setLeadEventNonce(`${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`);
+      transitionTo("success", "forward");
     } catch (error) {
       const message =
         error instanceof Error && error.message
@@ -2229,7 +2019,7 @@ export default function Home() {
 
               <button
                 type="button"
-                onClick={() => void handleNameContinue()}
+                onClick={() => transitionTo("phone", "forward")}
                 disabled={!answers.firstName.trim() || !answers.lastName.trim()}
                 className="inline-flex h-[54px] items-center justify-center gap-2 rounded-full bg-[var(--brand)] px-6 text-[18px] font-semibold text-white transition disabled:cursor-not-allowed disabled:opacity-45 hover:bg-[var(--brand-dark)]"
               >
@@ -2240,15 +2030,7 @@ export default function Home() {
           ) : null}
 
           {currentStep === "phone" ? (
-            <form
-              className={`mt-8 flex w-full max-w-[460px] flex-col gap-4 md:mt-10 ${animationClass}`}
-              data-tf-element-role="offer"
-              onSubmit={(event) => {
-                event.preventDefault();
-                void submitLead();
-              }}
-            >
-              <input type="hidden" name={trustedFormFieldName} />
+            <div className={`mt-8 flex w-full max-w-[460px] flex-col gap-4 md:mt-10 ${animationClass}`}>
               <div className="flex gap-3">
                 <select
                   value={answers.phoneCountry}
@@ -2263,44 +2045,23 @@ export default function Home() {
                   <option value="US">US +1</option>
                 </select>
 
-                <div className="relative min-w-0 flex-1">
-                  <input
-                    id="phone-number"
-                    name="tel"
-                    value={formatPhoneDigits(answers.phoneNumber)}
-                    onChange={(event) => {
-                      setAnswers((prev) => ({
-                        ...prev,
-                        phoneNumber: normalizeUsPhoneInput(event.target.value),
-                      }));
-                      setHasBlurredPhone(false);
-                      setPhoneError("");
-                    }}
-                    onInput={(event) => {
-                      const nextPhone = normalizeUsPhoneInput(event.currentTarget.value);
-                      if (nextPhone !== answers.phoneNumber) {
-                        setAnswers((prev) => ({
-                          ...prev,
-                          phoneNumber: nextPhone,
-                        }));
-                      }
-                      setHasBlurredPhone(false);
-                      setPhoneError("");
-                    }}
-                    onBlur={() => setHasBlurredPhone(true)}
-                    placeholder="000 000 0000"
-                    inputMode="tel"
-                    autoComplete="tel"
-                    enterKeyHint="next"
-                    aria-invalid={phoneValidationStatus === "invalid" || !!phoneError}
-                    className={`h-[58px] w-full rounded-[16px] border bg-white px-5 pr-12 text-[17px] text-[#101820] outline-none transition ${phoneBorderClass}`}
-                  />
-                  {phoneValidationStatus !== "idle" ? (
-                    <span className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2">
-                      <PhoneStatusIcon status={phoneValidationStatus} />
-                    </span>
-                  ) : null}
-                </div>
+                <input
+                  id="phone-number"
+                  name="tel"
+                  value={formatPhoneDigits(answers.phoneNumber)}
+                  onChange={(event) => {
+                    setAnswers((prev) => ({
+                      ...prev,
+                      phoneNumber: event.target.value,
+                    }));
+                    setPhoneError("");
+                  }}
+                  placeholder="000 000 0000"
+                  inputMode="tel"
+                  autoComplete="tel"
+                  enterKeyHint="next"
+                  className="h-[58px] min-w-0 flex-1 rounded-[16px] border border-[#9c9c9c] bg-white px-5 text-[17px] text-[#101820] outline-none transition focus:border-[var(--brand)]"
+                />
               </div>
 
               <div className="relative">
@@ -2329,7 +2090,7 @@ export default function Home() {
               </div>
 
               <p className="min-h-[22px] text-[14px] text-[#d14c4c]">
-                {visiblePhoneError}
+                {phoneError}
               </p>
 
               <p className="min-h-[22px] text-[14px] text-[#d14c4c]">
@@ -2337,9 +2098,8 @@ export default function Home() {
               </p>
 
               <button
-                type="submit"
-                name="submit-lead"
-                data-tf-element-role="submit"
+                type="button"
+                onClick={() => void submitLead()}
                 disabled={isSubmittingLead}
                 className="inline-flex h-[54px] items-center justify-center gap-2 rounded-full bg-[var(--brand)] px-6 text-[18px] font-semibold text-white transition disabled:cursor-wait disabled:opacity-70 hover:bg-[var(--brand-dark)]"
               >
@@ -2354,30 +2114,10 @@ export default function Home() {
                 )}
               </button>
 
-              <p
-                className="-mt-1 text-center text-[11px] leading-[1.45] text-[#6b7280]"
-                data-tf-element-role="consent-language"
-              >
-                Al hacer clic en <strong>“Ver mi cotización ahora”</strong>, doy mi consentimiento expreso por escrito y mi firma electrónica para que <strong>Best Life</strong>, sus{" "}
-                <Link href="/socios" className="font-bold text-[#4b5563] underline underline-offset-2">
-                  socios de mercadeo y aseguradoras licenciadas
-                </Link>{" "}
-                y cualquier persona que llame o envíe mensajes en su nombre, me contacten al número de teléfono y correo electrónico proporcionados incluso si están en alguna lista “No Llamar” estatal, federal o interna con fines de mercadeo de seguros de vida, IUL, gastos finales y productos financieros relacionados. Acepto que dichas comunicaciones pueden hacerse mediante{" "}
-                <strong>sistemas de marcación automática, marcadores predictivos, mensajes de voz pregrabada o artificial (incluyendo IA), y SMS automatizados.</strong>{" "}
-                Pueden aplicar tarifas estándar de mensajes y datos. <strong>Entiendo que este consentimiento no es condición para comprar ningún producto</strong> y que puedo revocarlo en cualquier momento respondiendo <strong>STOP</strong> a un SMS o usando el enlace de cancelación en los correos. He leído y acepto la{" "}
-                <Link href="/privacy" className="font-bold text-[#4b5563] underline underline-offset-2">
-                  Política de Privacidad
-                </Link>{" "}
-                y los{" "}
-                <Link href="/terms" className="font-bold text-[#4b5563] underline underline-offset-2">
-                  Términos de Uso
-                </Link>.
-              </p>
-
               <p className="min-h-[22px] text-[14px] text-[#d14c4c]">
                 {submitError}
               </p>
-            </form>
+            </div>
           ) : null}
 
           {currentStep === "email" ? (
@@ -2460,21 +2200,18 @@ export default function Home() {
 
   return (
     <main className="min-h-screen bg-[var(--page-bg)] text-[var(--ink)]">
-      <noscript>
-        <img src="https://api.trustedform.com/ns.gif" alt="" />
-      </noscript>
       <style jsx global>{`
         @import url("https://fonts.googleapis.com/css2?family=Montserrat:wght@400;700;800&display=swap");
       `}</style>
-      <header className="border-b border-transparent bg-white/96 shadow-[0_6px_18px_rgba(18,31,53,0.08)] backdrop-blur-sm">
+      <header className="border-b border-black/6 bg-white/96 shadow-[0_6px_18px_rgba(18,31,53,0.08)] backdrop-blur-sm">
         <div className="mx-auto flex h-[60px] w-full max-w-[1200px] items-center justify-between px-4 md:relative md:justify-center">
           <Image
             src="/best-money-assets/logo-best-life.png"
             alt="Best Life"
-            width={190}
-            height={60}
+            width={180}
+            height={48}
             priority
-            className="h-[36px] w-[148px] object-contain md:h-[40px] md:w-[190px]"
+            className="h-auto w-[148px] md:w-[160px]"
           />
           <div className="flex items-center gap-2 text-[14px] font-semibold text-[#191919] md:absolute md:right-4">
             <Image
@@ -2507,22 +2244,6 @@ export default function Home() {
           </div>
         </>
       )}
-      <PopUp1
-        open={isPayPerCallPopupOpen}
-        firstName={submittedFirstName || answers.firstName}
-        goal={submittedInsuranceGoal || answers.insuranceGoal}
-        leadId={submittedLeadId}
-        continueUrl={submittedContinueUrl || "/thanks/call2"}
-        phoneNumber={runtimeConfig.payPerCallPhoneNumber}
-        ringbaCampaignId={runtimeConfig.ringbaCampaignId}
-        ringbaTags={{
-          funnel_id: "iul-v4",
-          lead_id: submittedLeadId,
-          iul_v4_age_group: answers.ageGroup,
-          iul_v4_insurance_goal: submittedInsuranceGoal || answers.insuranceGoal,
-        }}
-        onClose={() => setIsPayPerCallPopupOpen(false)}
-      />
       <footer className="px-4 pb-5 pt-3 text-center text-[9px] leading-[1.45] text-[#b8bec8] md:text-[10px]">
         <p>© 2025 Best Life. All Rights Reserved.</p>
         <p className="mx-auto mt-2 max-w-[920px]">
