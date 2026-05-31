@@ -1602,6 +1602,7 @@ export default function Home() {
       const urlParams = new URLSearchParams(window.location.search);
       const sub1 = urlParams.get("sub1")?.trim() || "";
       const sub2 = urlParams.get("sub2")?.trim() || "";
+      const adaccountName = urlParams.get("adaccount_name")?.trim() || "";
       const cleanedAnswers = Object.fromEntries(
         Object.entries({
           ageGroup: completedAnswers.ageGroup,
@@ -1634,6 +1635,7 @@ export default function Home() {
             deviceId: getOrCreateDeviceId(),
             trustedFormCertUrl: getTrustedFormCertUrl(),
             salePath: shouldUsePayPerCallThankYou ? "call" : "lead",
+            adaccountName,
           },
         }),
       });

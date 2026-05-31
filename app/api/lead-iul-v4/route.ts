@@ -11,6 +11,7 @@ type LeadPayload = {
     deviceId?: string;
     trustedFormCertUrl?: string;
     salePath?: "lead" | "call";
+    adaccountName?: string;
   };
 };
 
@@ -417,6 +418,7 @@ export async function POST(request: Request) {
   const phoneValidation = validateUsPhone(body.answers.phoneNumber);
   const deviceId = String(body.meta?.deviceId || getRequestCookie(request, deviceCookieName)).trim();
   const trustedFormCertUrl = normalizeString(body.meta?.trustedFormCertUrl);
+  const adaccountName = normalizeString(body.meta?.adaccountName);
   const now = Date.now();
   maybePruneAttemptStores(now);
   const duplicatePhoneCount = phoneValidation.normalized
@@ -472,6 +474,7 @@ export async function POST(request: Request) {
     domain: leadDomain,
     sub1,
     sub2,
+    adaccountName: adaccountName || null,
     ipAddress: requestIp,
     geolocation: geo,
     trustedFormCertUrl,
@@ -535,6 +538,7 @@ export async function POST(request: Request) {
       device_id: deviceId || null,
       validation: lead.validation,
       risk_flags: riskFlags,
+      adaccount_name: adaccountName || null,
       payload: lead,
     });
 
