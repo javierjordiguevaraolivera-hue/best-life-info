@@ -450,7 +450,7 @@ export default function BenchCall2Page({
         </h1>
         <div className="mx-auto mt-4 w-full max-w-[440px]">
           <p className="text-[16px] leading-[1.5] text-[#5d6674]">
-            Basado en tu información, al llamar puedes solicitar estos beneficios.
+            Al llamar puedes solicitar beneficios adicionales como:
           </p>
           <div className="mt-4 grid gap-2.5 text-left" aria-live="polite">
             {calculatedBenefits.slice(0, Math.min(resolvedBenefitCount + 1, calculatedBenefits.length)).map((benefit, index) => {
