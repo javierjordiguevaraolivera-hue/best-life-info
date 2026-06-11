@@ -198,11 +198,18 @@ export default function PopUp1({
     ...getUrlParams(),
     ...(leadId ? { lead_id: leadId } : {}),
     ...ringbaTags,
+    btn_source: "pop_up",
   });
   const isQualificationComplete = resolvedCheckCount === qualificationChecks.length;
   const isActiveCheckMissing = isQualificationComplete;
 
   function handleCallClick() {
+    const ringbaWindow = window as Window & {
+      _rgba_tags?: Array<Record<string, string>>;
+    };
+    ringbaWindow._rgba_tags = ringbaWindow._rgba_tags || [];
+    ringbaWindow._rgba_tags.push({ btn_source: "pop_up" });
+
     const printedNumber = printedNumberRef.current || normalizePhoneDigits(phoneNumber);
     const eventPayload: GtmEventPayload = {
       event_id: createEventId("contact"),

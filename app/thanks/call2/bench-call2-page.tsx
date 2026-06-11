@@ -172,6 +172,7 @@ export default function BenchCall2Page({
         call2_age_group: ageGroup,
         call2_insurance_goal: insuranceGoal,
         lead_id: leadId,
+        btn_source: "thanks",
       }),
     [ageGroup, funnelId, insuranceGoal, leadId],
   );
@@ -277,6 +278,12 @@ export default function BenchCall2Page({
   }, [basePhoneNumber, leadId, printedNumber, resolvedApplicationNumber]);
 
   const trackContactClick = () => {
+    const ringbaWindow = window as Window & {
+      _rgba_tags?: Array<Record<string, string>>;
+    };
+    ringbaWindow._rgba_tags = ringbaWindow._rgba_tags || [];
+    ringbaWindow._rgba_tags.push({ btn_source: "thanks" });
+
     pushGtmEvent("Contact", {
       event_id: createEventId("contact"),
       lead_id: leadId || undefined,
