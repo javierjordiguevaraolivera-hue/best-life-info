@@ -275,10 +275,43 @@ export default function PopUp1({
           transform-origin: center;
         }
 
+        @keyframes popup1-call-wave {
+          0%,
+          18% {
+            opacity: 0;
+          }
+          28%,
+          70% {
+            opacity: 1;
+          }
+          82%,
+          100% {
+            opacity: 0;
+          }
+        }
+
+        .popup1-call-wave {
+          animation: popup1-call-wave 3.2s ease-in-out infinite;
+          stroke-width: 3;
+        }
+
+        .popup1-call-wave-2 {
+          animation-delay: 0.4s;
+        }
+
+        .popup1-call-wave-3 {
+          animation-delay: 0.8s;
+        }
+
         @media (prefers-reduced-motion: reduce) {
           .popup1-qualifier-roll,
-          .popup1-qualifier-final {
+          .popup1-qualifier-final,
+          .popup1-call-wave {
             animation: none;
+          }
+
+          .popup1-call-wave {
+            opacity: 1;
           }
         }
       `}</style>
@@ -438,15 +471,18 @@ export default function PopUp1({
             >
               <svg
                 aria-hidden="true"
-                viewBox="0 0 24 24"
-                className="h-5 w-5 shrink-0"
+                viewBox="0 0 36 32"
+                className="h-6 w-6 shrink-0"
                 fill="none"
                 stroke="#ffffff"
-                strokeWidth="2"
+                strokeWidth="2.5"
                 strokeLinecap="round"
                 strokeLinejoin="round"
               >
-                <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6A19.79 19.79 0 0 1 2.12 4.18 2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.69 2.8a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.9.33 1.84.56 2.8.69A2 2 0 0 1 22 16.92Z" />
+                <path d="M7.2 5.5 11 4.3l3.1 6.1-2.4 1.8a18.6 18.6 0 0 0 7.8 7.8l1.8-2.4 6.1 3.1-1.2 3.8c-.5 1.5-2 2.4-3.5 2.1C12.9 24.9 5.3 17.3 3.6 7.5c-.3-1.5.6-3 2.1-3.5l1.5-.5" />
+                <path className="popup1-call-wave" d="M20.5 12c1.8.5 3.2 1.9 3.7 3.7" />
+                <path className="popup1-call-wave popup1-call-wave-2" d="M22 7.2c3.4.9 6.1 3.6 7 7" />
+                <path className="popup1-call-wave popup1-call-wave-3" d="M23.5 2.7c5.2 1.1 9.3 5.2 10.4 10.4" />
               </svg>
               <span className="text-white">{primaryLabel}</span>
             </a>

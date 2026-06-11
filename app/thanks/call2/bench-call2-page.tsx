@@ -25,7 +25,6 @@ const calculatedBenefits = [
   { label: "Death Benefits", icon: "ribbon" },
   { label: "Final Expenses", icon: "flowers" },
   { label: "Cash Value for Retirement", icon: "coins" },
-  { label: "Life Insurance Policy", icon: "shield" },
 ];
 
 function BenefitIcon({ icon }: { icon: string }) {
