@@ -849,6 +849,7 @@ export default function Home() {
   const trackedStepsRef = useRef<Set<string>>(new Set());
   const trackedAutoZipRef = useRef(false);
   const submittedLeadRef = useRef(false);
+  const leadUrlRef = useRef("");
   const runtimeConfigRef = useRef<RuntimeConfig>(defaultRuntimeConfig);
 
   const isSuccessPage = currentStep === "success";
@@ -923,6 +924,10 @@ export default function Home() {
       ...getUtmParams(),
     };
   }
+
+  useEffect(() => {
+    leadUrlRef.current = window.location.href;
+  }, []);
 
   useEffect(() => {
     if (hasAgeRejectedCookie()) {
@@ -1647,6 +1652,7 @@ export default function Home() {
             trustedFormCertUrl: getTrustedFormCertUrl(),
             salePath: shouldUsePayPerCallThankYou ? "call" : "lead",
             adaccountName,
+            leadUrl: leadUrlRef.current || window.location.href,
           },
         }),
       });
