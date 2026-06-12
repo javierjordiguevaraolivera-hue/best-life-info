@@ -421,6 +421,7 @@ export async function POST(request: Request) {
   const trustedFormCertUrl = normalizeString(body.meta?.trustedFormCertUrl);
   const adaccountName = normalizeString(body.meta?.adaccountName);
   const leadUrl = normalizeString(body.meta?.leadUrl);
+  const userAgent = normalizeString(request.headers.get("user-agent"));
   const now = Date.now();
   maybePruneAttemptStores(now);
   const duplicatePhoneCount = phoneValidation.normalized
@@ -478,6 +479,7 @@ export async function POST(request: Request) {
     sub2,
     adaccountName: adaccountName || null,
     ipAddress: requestIp,
+    userAgent: userAgent || null,
     geolocation: geo,
     trustedFormCertUrl,
     salePath,
