@@ -16,7 +16,6 @@ const incomeOptions = [
   "Menos de $40,000",
   "Desempleado/a",
 ];
-const qualifiedIncomeOptions = new Set(["$60,000 – $79,999", "$80,000 – $99,999", "$100,000 o más"]);
 const eligibilityOptionLabels: Record<string, { title: string; subtitle?: string }> = {
   "Residente permanente (Green Card)": {
     title: "Residente permanente",
@@ -748,11 +747,21 @@ export default function QuotifyUs2PageClient() {
         step?: Step;
         disqualificationReason?: DisqualificationReason;
       };
+      const wasDisqualifiedByIncome =
+        parsed.step === "disqualified" && parsed.disqualificationReason === "income";
       if (parsed.answers) setAnswers((prev) => ({ ...prev, ...parsed.answers }));
-      if (parsed.disqualificationReason && disqualificationReasons.includes(parsed.disqualificationReason)) {
+      if (
+        !wasDisqualifiedByIncome &&
+        parsed.disqualificationReason &&
+        disqualificationReasons.includes(parsed.disqualificationReason)
+      ) {
         setDisqualificationReason(parsed.disqualificationReason);
       }
-      if (parsed.step && parsed.step !== "success" && steps.includes(parsed.step)) setStep(parsed.step);
+      if (wasDisqualifiedByIncome) {
+        setStep("income");
+      } else if (parsed.step && parsed.step !== "success" && steps.includes(parsed.step)) {
+        setStep(parsed.step);
+      }
     } catch {}
   }, []);
 
@@ -1156,15 +1165,7 @@ export default function QuotifyUs2PageClient() {
                       selected={answers.annualIncome === option || (!answers.annualIncome && option === incomeOptions[0])}
                       onClick={() => {
                         setAnswers((prev) => ({ ...prev, annualIncome: option }));
-                        if (!qualifiedIncomeOptions.has(option)) setDisqualificationReason("income");
-                        window.setTimeout(() => {
-                          if (!qualifiedIncomeOptions.has(option)) {
-                            setStep("disqualified");
-                            return;
-                          }
-
-                          setStep(nextStepAfterEligibility);
-                        }, 120);
+                        window.setTimeout(() => setStep(nextStepAfterEligibility), 120);
                       }}
                     />
                   ))}
