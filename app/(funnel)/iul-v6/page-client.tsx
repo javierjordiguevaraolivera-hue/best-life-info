@@ -2635,7 +2635,7 @@ export default function IulV6Client({ initialPrelandName }: IulV6ClientProps) {
 
           {currentStep === "phone" ? (
             <form
-              className={`mt-8 flex w-full max-w-[460px] flex-col gap-4 md:mt-10 ${animationClass}`}
+              className={`mt-8 flex w-full max-w-[460px] flex-col md:mt-10 ${animationClass}`}
               data-tf-element-role="offer"
               onSubmit={(event) => {
                 event.preventDefault();
@@ -2644,18 +2644,12 @@ export default function IulV6Client({ initialPrelandName }: IulV6ClientProps) {
             >
               <input type="hidden" name={trustedFormFieldName} />
               <div className="flex gap-3">
-                <select
-                  value={answers.phoneCountry}
-                  onChange={(event) =>
-                    setAnswers((prev) => ({
-                      ...prev,
-                      phoneCountry: event.target.value,
-                    }))
-                  }
-                  className="h-[58px] min-w-[106px] rounded-[16px] border border-[#9c9c9c] bg-white px-4 text-[17px] text-[#101820] outline-none transition focus:border-[var(--brand)]"
+                <div
+                  aria-label="Codigo de pais Estados Unidos +1"
+                  className="flex h-[58px] min-w-[106px] items-center justify-center rounded-[16px] border border-[#9c9c9c] bg-white px-4 text-[17px] font-black text-[#101820]"
                 >
-                  <option value="US">US +1</option>
-                </select>
+                  US +1
+                </div>
 
                 <div className="relative min-w-0 flex-1">
                   <input
@@ -2702,7 +2696,7 @@ export default function IulV6Client({ initialPrelandName }: IulV6ClientProps) {
                 </div>
               </div>
 
-              <div className="relative">
+              <div className="relative mt-3">
                 <span className="pointer-events-none absolute left-5 top-1/2 -translate-y-1/2 text-[#6b7280]">
                   <svg aria-hidden="true" viewBox="0 0 24 24" className="h-[18px] w-[18px]" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M4 7h16v10H4z" /><path d="m4 8 8 6 8-6" /></svg>
                 </span>
@@ -2728,7 +2722,7 @@ export default function IulV6Client({ initialPrelandName }: IulV6ClientProps) {
               </div>
 
               {visiblePhoneError || emailError || submitError ? (
-                <p className="text-[14px] text-[#d14c4c]">
+                <p className="mt-2 text-[14px] text-[#d14c4c]">
                   {visiblePhoneError || emailError || submitError}
                 </p>
               ) : null}
@@ -2738,7 +2732,7 @@ export default function IulV6Client({ initialPrelandName }: IulV6ClientProps) {
                 name="submit-lead"
                 data-tf-element-role="submit"
                 disabled={isSubmittingLead || isPhoneValidating || !isPhoneVerified}
-                className="inline-flex h-[54px] items-center justify-center gap-2 rounded-full bg-[var(--brand)] px-6 text-[18px] font-semibold text-white transition disabled:cursor-wait disabled:opacity-70 hover:bg-[var(--brand-dark)]"
+                className="mt-5 inline-flex h-[54px] items-center justify-center gap-2 rounded-full bg-[var(--brand)] px-6 text-[18px] font-semibold text-white transition disabled:cursor-wait disabled:opacity-70 hover:bg-[var(--brand-dark)]"
               >
                 <span>Ver mi cotización ahora</span>
                 {isSubmittingLead ? (
@@ -2752,7 +2746,7 @@ export default function IulV6Client({ initialPrelandName }: IulV6ClientProps) {
               </button>
 
               <p
-                className="-mt-2 text-center text-[11px] leading-[1.45] text-[#6b7280]"
+                className="mt-3 text-center text-[11px] leading-[1.45] text-[#6b7280]"
                 data-tf-element-role="consent-language"
               >
                 Al hacer clic en <strong>“Ver mi cotización ahora”</strong>, doy mi consentimiento expreso por escrito y mi firma electrónica para que <strong>Best Life</strong>, sus{" "}

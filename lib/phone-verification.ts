@@ -67,8 +67,16 @@ export function getPhoneLengthMessage(value: unknown) {
 
 export function isVeriphoneMobileResult(data: VeriphoneResponse) {
   const carrier = String(data.carrier || "").trim().toLowerCase();
+  const countryCode = String(data.country_code || "").trim().toUpperCase();
+  const country = String(data.country || "").trim().toLowerCase();
 
-  return data.phone_valid === true && data.phone_type === "mobile" && !!carrier && carrier !== "unknown";
+  return (
+    data.phone_valid === true &&
+    data.phone_type === "mobile" &&
+    !!carrier &&
+    carrier !== "unknown" &&
+    (countryCode === "US" || country === "united states")
+  );
 }
 
 export function createPhoneVerificationToken(normalized: string) {
@@ -155,6 +163,8 @@ export async function verifyPhoneWithVeriphone(value: unknown): Promise<PhoneVer
   }
 
   const isValid = isVeriphoneMobileResult(data);
+  const countryCode = String(data.country_code || "").trim().toUpperCase();
+  const country = String(data.country || "").trim().toLowerCase();
   const flags = [
     ...(data.phone_valid === true ? [] : ["veriphone_invalid_phone"]),
     ...(data.phone_type === "mobile" ? [] : ["veriphone_not_mobile"]),
@@ -164,12 +174,13 @@ export async function verifyPhoneWithVeriphone(value: unknown): Promise<PhoneVer
         ? []
         : ["veriphone_unknown_carrier"]
     ),
+    ...(countryCode === "US" || country === "united states" ? [] : ["veriphone_not_us"]),
   ];
 
   return {
     isValid,
     normalized,
-    reason: isValid ? undefined : "Ingresa un numero movil valido de EE.UU.",
+    reason: isValid ? undefined : "Ingresa un numero movil valido de Estados Unidos.",
     flags,
     veriphone: data,
   };
