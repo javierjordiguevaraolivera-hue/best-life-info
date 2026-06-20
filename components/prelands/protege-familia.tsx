@@ -38,8 +38,8 @@ export default function ProtegeFamiliaPreland({ onContinue }: ProtegeFamiliaPrel
       {/* This prelanding intentionally renders only the content inside the phone reference. */}
       <section className="mx-auto flex h-[100svh] w-full max-w-[430px] flex-col bg-white md:max-w-[760px] md:shadow-[0_0_40px_rgba(15,23,42,0.06)]">
         {/* Brand row uses the existing IUL logo asset, inverted only here so other landings keep their logo unchanged. */}
-        <header className="flex h-[clamp(76px,12svh,104px)] shrink-0 items-center justify-center bg-white px-[clamp(20px,6svw,30px)] md:h-[92px]">
-          <div className="relative h-[clamp(42px,7.8svh,62px)] w-[min(62vw,245px)] md:h-[58px] md:w-[230px]">
+        <header className="flex h-[clamp(54px,8svh,72px)] shrink-0 items-center justify-center bg-white px-[clamp(20px,6svw,30px)] md:h-[64px]">
+          <div className="relative h-[clamp(24px,4.7svh,34px)] w-[min(34vw,122px)] md:h-[32px] md:w-[120px]">
             <Image
               priority
               src="/best-life-assets/seguros-de-vida-prweland-logo.png"
