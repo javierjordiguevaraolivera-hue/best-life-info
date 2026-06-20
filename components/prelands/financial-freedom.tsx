@@ -1,6 +1,7 @@
 "use client";
 
 import Image from "next/image";
+import { Montserrat } from "next/font/google";
 
 type FinancialFreedomPrelandProps = {
   onContinue: () => void;
@@ -15,6 +16,12 @@ const benefits = [
   "Potencial de crecimiento",
   "Legado para tu familia",
 ];
+
+const montserrat = Montserrat({
+  subsets: ["latin"],
+  weight: ["500", "600", "700", "800", "900"],
+  display: "swap",
+});
 
 function CheckIcon() {
   return (
@@ -40,13 +47,8 @@ export default function FinancialFreedomPreland({
 }: FinancialFreedomPrelandProps) {
   return (
     <main className="min-h-[100svh] bg-[#e4f3f4] text-[#142844] sm:bg-white">
-      <style jsx global>{`
-        @import url("https://fonts.googleapis.com/css2?family=Montserrat:wght@500;600;700;800;900&display=swap");
-      `}</style>
-
       <section
-        className="mx-auto flex min-h-[100svh] w-full max-w-[760px] flex-col bg-white shadow-[0_12px_40px_rgba(15,23,42,0.12)] sm:min-h-screen md:shadow-none"
-        style={{ fontFamily: '"Montserrat", Arial, sans-serif' }}
+        className={`${montserrat.className} mx-auto flex min-h-[100svh] w-full max-w-[760px] flex-col bg-white shadow-[0_12px_40px_rgba(15,23,42,0.12)] sm:min-h-screen md:shadow-none`}
       >
         <header className="flex h-[17svh] min-h-[108px] max-h-[136px] items-center justify-center bg-[#003a73] px-7 py-5 text-white shadow-[inset_0_-10px_28px_rgba(0,0,0,0.16)] md:h-[118px] md:min-h-[118px] md:max-h-[118px] md:w-screen md:max-w-none md:translate-x-[calc((760px-100vw)/2)] md:py-5">
           <Image
