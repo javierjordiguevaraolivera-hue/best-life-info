@@ -2727,13 +2727,11 @@ export default function IulV6Client({ initialPrelandName }: IulV6ClientProps) {
                 />
               </div>
 
-              <p className="min-h-[22px] text-[14px] text-[#d14c4c]">
-                {visiblePhoneError}
-              </p>
-
-              <p className="min-h-[22px] text-[14px] text-[#d14c4c]">
-                {emailError}
-              </p>
+              {visiblePhoneError || emailError || submitError ? (
+                <p className="text-[14px] text-[#d14c4c]">
+                  {visiblePhoneError || emailError || submitError}
+                </p>
+              ) : null}
 
               <button
                 type="submit"
@@ -2754,7 +2752,7 @@ export default function IulV6Client({ initialPrelandName }: IulV6ClientProps) {
               </button>
 
               <p
-                className="-mt-1 text-center text-[11px] leading-[1.45] text-[#6b7280]"
+                className="-mt-2 text-center text-[11px] leading-[1.45] text-[#6b7280]"
                 data-tf-element-role="consent-language"
               >
                 Al hacer clic en <strong>“Ver mi cotización ahora”</strong>, doy mi consentimiento expreso por escrito y mi firma electrónica para que <strong>Best Life</strong>, sus{" "}
@@ -2773,9 +2771,6 @@ export default function IulV6Client({ initialPrelandName }: IulV6ClientProps) {
                 </Link>.
               </p>
 
-              <p className="min-h-[22px] text-[14px] text-[#d14c4c]">
-                {submitError}
-              </p>
             </form>
           ) : null}
 

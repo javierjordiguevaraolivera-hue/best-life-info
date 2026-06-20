@@ -360,12 +360,18 @@ export async function POST(request: Request) {
     "unknown";
   const normalizedPhone = normalizeUsPhone(body.answers.phoneNumber);
   const phoneLengthMessage = getPhoneLengthMessage(normalizedPhone);
-  const phoneVerification = body.meta?.phoneVerification || null;
+  const phoneVerificationEnvelope = body.meta?.phoneVerification as
+    | (VeriphoneResponse & { veriphone?: VeriphoneResponse | null; verificationToken?: unknown })
+    | null
+    | undefined;
+  // /api/phone-verify returns a small envelope for the UI. Supabase should store
+  // only the raw Veriphone payload, and validation should read that raw payload.
+  const phoneVerification = phoneVerificationEnvelope?.veriphone || phoneVerificationEnvelope || null;
   const isVerifiedMobile = !!phoneVerification && isVeriphoneMobileResult(phoneVerification);
   const phoneVerificationMatches =
     normalizeUsPhone(phoneVerification?.phone || phoneVerification?.e164 || normalizedPhone) === normalizedPhone;
   const hasVerifiedPhoneToken = verifyPhoneVerificationToken(
-    body.meta?.phoneVerificationToken,
+    body.meta?.phoneVerificationToken || phoneVerificationEnvelope?.verificationToken,
     normalizedPhone,
   );
   // Veriphone is called by /api/phone-verify as soon as the contact step has 10 digits.
