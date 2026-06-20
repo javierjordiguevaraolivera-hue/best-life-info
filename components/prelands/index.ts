@@ -1,6 +1,7 @@
 import type { ComponentType } from "react";
 
 import FinancialFreedomPreland from "./financial-freedom";
+import ProtegeFamiliaPreland from "./protege-familia";
 import SecureFuturePreland from "./secure-future";
 
 export type PrelandComponentProps = {
@@ -17,6 +18,7 @@ export type PrelandName = keyof typeof prelandRegistry;
 //    because the funnel only removes the `preland` param after the CTA.
 const prelandRegistry = {
   financial_freedom: FinancialFreedomPreland,
+  protege_familia: ProtegeFamiliaPreland,
   secure_future: SecureFuturePreland,
 } satisfies Record<string, ComponentType<PrelandComponentProps>>;
 
