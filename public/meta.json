@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json.schemastore.org/web-manifest-combined.json",
+  "name": "Best Life IUL Insurance",
+  "short_name": "Best Life",
+  "title": "Best Life IUL Insurance",
+  "description": "Consulta opciones de seguro IUL y proteccion financiera con Best Life.",
+  "application_name": "Best Life",
+  "lang": "es-US",
+  "locale": "es_US",
+  "type": "website",
+  "site_name": "Best Life",
+  "url": "https://www.best-life.info",
+  "start_url": "/iul-v6",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "theme_color": "#2f6fe4",
+  "background_color": "#ffffff",
+  "robots": {
+    "index": true,
+    "follow": true
+  },
+  "open_graph": {
+    "title": "Best Life IUL Insurance",
+    "description": "Consulta opciones de seguro IUL y proteccion financiera con Best Life.",
+    "site_name": "Best Life",
+    "type": "website",
+    "locale": "es_US",
+    "url": "https://www.best-life.info/iul-v6",
+    "image": "https://www.best-life.info/best-life-assets/best-life-icon.png"
+  },
+  "twitter": {
+    "card": "summary",
+    "title": "Best Life IUL Insurance",
+    "description": "Consulta opciones de seguro IUL y proteccion financiera con Best Life.",
+    "image": "https://www.best-life.info/best-life-assets/best-life-icon.png"
+  },
+  "icons": [
+    {
+      "src": "/best-life-assets/best-life-icon.png",
+      "sizes": "1024x1024",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "https://www.best-life.info/best-life-assets/best-life-icon.png",
+      "sizes": "1024x1024",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "assets": {
+    "logo": "/best-life-assets/logo-best-life.png",
+    "icon": "/best-life-assets/best-life-icon.png",
+    "secure_form_badge": "/best-life-assets/secure-form-best-life2.png",
+    "bbb_badge": "/best-life-assets/busines-acredited-bbb.avif",
+    "ssl_badge": "/best-life-assets/ssl-encription.avif"
+  },
+  "routes": {
+    "home": "/",
+    "funnel": "/iul-v6",
+    "privacy": "/privacy",
+    "terms": "/terms",
+    "partners": "/socios",
+    "thanks_lead": "/thanks/lead",
+    "thanks_call": "/thanks/call2"
+  },
+  "funnel": {
+    "id": "iul-v6",
+    "steps": ["preland", "age", "goal", "zip", "name", "contact", "submit"],
+    "default_url": "https://www.best-life.info/iul-v6"
+  }
+}
