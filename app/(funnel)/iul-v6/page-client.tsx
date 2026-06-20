@@ -177,6 +177,20 @@ type RuntimeConfig = {
   ringbaCampaignId: string;
 };
 
+type TrafficSource = "network" | "internal";
+
+type TrafficAttribution = {
+  source: TrafficSource;
+  sub1: string | null;
+  sub2: string | null;
+  adaccountName: string | null;
+};
+
+type EverflowSdk = {
+  click: (payload: Record<string, string | undefined>) => unknown;
+  urlParameter?: (name: string) => string | undefined;
+};
+
 const stepOrder: FunnelStep[] = [
   "intro",
   "age",
@@ -217,6 +231,10 @@ const ageRejectedCookieName = "bf_age_rejected_iul_v6";
 const ageRejectedCookieDurationDays = 90;
 const ageRejectedHash = "#no-califica";
 const blockedStateName = "New York";
+const everflowSdkScriptUrl = "https://www.jk8gcxs.com/scripts/main.js";
+const everflowDirectLinkOfferId = "3765";
+const everflowTransactionStorageKey = "best-life-everflow-transaction-id";
+let everflowSdkPromise: Promise<EverflowSdk> | null = null;
 
 const thankYouHighlights = [
   {
@@ -825,6 +843,194 @@ function getAnalyticsState(value?: string | null) {
   return stateAbbreviations[state] || lowerAnalyticsValue(state);
 }
 
+function getTrimmedParam(searchParams: URLSearchParams, name: string) {
+  return searchParams.get(name)?.trim() || "";
+}
+
+function isEverflowDirectLink(searchParams: URLSearchParams) {
+  return !!getTrimmedParam(searchParams, "oid") && !!getTrimmedParam(searchParams, "affid");
+}
+
+function getStoredEverflowTransactionId() {
+  if (typeof window === "undefined") return null;
+
+  try {
+    return (
+      window.sessionStorage.getItem(everflowTransactionStorageKey) ||
+      window.localStorage.getItem(everflowTransactionStorageKey)
+    );
+  } catch {
+    return null;
+  }
+}
+
+function storeEverflowTransactionId(transactionId: string) {
+  if (typeof window === "undefined" || !transactionId) return;
+
+  try {
+    window.sessionStorage.setItem(everflowTransactionStorageKey, transactionId);
+    window.localStorage.setItem(everflowTransactionStorageKey, transactionId);
+  } catch {
+    // The lead can still submit; storage only keeps the TID available until submit.
+  }
+}
+
+function getNestedTransactionId(value: unknown): string | null {
+  if (!value) return null;
+  if (typeof value === "string") return value.trim() || null;
+  if (typeof value !== "object") return null;
+
+  const record = value as Record<string, unknown>;
+  const directValue =
+    record.transaction_id ||
+    record.transactionId ||
+    record.transactionIdValue ||
+    record.tid ||
+    record.id;
+
+  if (typeof directValue === "string" && directValue.trim()) {
+    return directValue.trim();
+  }
+
+  return getNestedTransactionId(record.data) || getNestedTransactionId(record.response);
+}
+
+function readEverflowTransactionIdFromBrowser() {
+  if (typeof window === "undefined") return null;
+
+  const urlTransactionId = getTrimmedParam(new URLSearchParams(window.location.search), "_ef_transaction_id");
+  if (urlTransactionId) return urlTransactionId;
+
+  try {
+    const storageCandidates = [window.localStorage, window.sessionStorage];
+
+    for (const storage of storageCandidates) {
+      for (let index = 0; index < storage.length; index += 1) {
+        const key = storage.key(index) || "";
+        const value = storage.getItem(key) || "";
+
+        if (/ef|everflow|transaction/i.test(key) && value.trim()) {
+          return value.trim();
+        }
+      }
+    }
+  } catch {
+    // Some privacy modes block storage enumeration; EF.click return is still preferred.
+  }
+
+  return null;
+}
+
+function loadEverflowSdk() {
+  if (typeof window === "undefined") {
+    return Promise.reject(new Error("Everflow SDK can only load in the browser"));
+  }
+
+  const existingSdk = (window as Window & { EF?: EverflowSdk }).EF;
+  if (existingSdk?.click) return Promise.resolve(existingSdk);
+  if (everflowSdkPromise) return everflowSdkPromise;
+
+  everflowSdkPromise = new Promise((resolve, reject) => {
+    const existingScript = document.querySelector<HTMLScriptElement>(
+      `script[src="${everflowSdkScriptUrl}"]`,
+    );
+
+    const finishWhenReady = () => {
+      const sdk = (window as Window & { EF?: EverflowSdk }).EF;
+      if (sdk?.click) {
+        resolve(sdk);
+        return;
+      }
+      reject(new Error("Everflow SDK loaded without EF.click"));
+    };
+
+    if (existingScript) {
+      existingScript.addEventListener("load", finishWhenReady, { once: true });
+      existingScript.addEventListener("error", () => reject(new Error("Everflow SDK failed to load")), {
+        once: true,
+      });
+      return;
+    }
+
+    const script = document.createElement("script");
+    script.type = "text/javascript";
+    script.src = everflowSdkScriptUrl;
+    script.async = true;
+    script.onload = finishWhenReady;
+    script.onerror = () => reject(new Error("Everflow SDK failed to load"));
+    document.head.appendChild(script);
+  });
+
+  return everflowSdkPromise;
+}
+
+async function requestEverflowDirectLinkTransaction(searchParams: URLSearchParams) {
+  const sdk = await loadEverflowSdk();
+  const payload = {
+    offer_id: everflowDirectLinkOfferId,
+    affiliate_id: getTrimmedParam(searchParams, "affid"),
+    source_id: getTrimmedParam(searchParams, "source_id") || undefined,
+    sub1: getTrimmedParam(searchParams, "sub1") || undefined,
+    sub2: getTrimmedParam(searchParams, "sub2") || undefined,
+    sub3: getTrimmedParam(searchParams, "sub3") || undefined,
+    sub4: getTrimmedParam(searchParams, "sub4") || undefined,
+    sub5: getTrimmedParam(searchParams, "sub5") || undefined,
+    uid: getTrimmedParam(searchParams, "uid") || undefined,
+    transaction_id: getTrimmedParam(searchParams, "_ef_transaction_id") || undefined,
+  };
+
+  // Direct Linking only needs the click/TID. Conversion firing stays server-side/later.
+  const clickResult = await Promise.resolve(sdk.click(payload));
+  const transactionId =
+    getNestedTransactionId(clickResult) ||
+    readEverflowTransactionIdFromBrowser();
+
+  if (transactionId) storeEverflowTransactionId(transactionId);
+  return transactionId;
+}
+
+function resolveTrafficAttribution(searchParams: URLSearchParams): TrafficAttribution {
+  const uniqueParamNames = Array.from(new Set(searchParams.keys()));
+  const sub1 = getTrimmedParam(searchParams, "sub1");
+  const sub2 = getTrimmedParam(searchParams, "sub2");
+  const affid = getTrimmedParam(searchParams, "affid");
+  const adaccountName = getTrimmedParam(searchParams, "adaccount_name") || null;
+  const everflowTransactionId = getStoredEverflowTransactionId();
+  const isStrictEverflowRedirect =
+    uniqueParamNames.length === 2 &&
+    uniqueParamNames.every((name) => name === "sub1" || name === "sub2") &&
+    !!sub1 &&
+    !!sub2;
+
+  // Redirect tracking arrives with only sub1/sub2, so those values are already final.
+  if (isStrictEverflowRedirect) {
+    return {
+      source: "network",
+      sub1,
+      sub2,
+      adaccountName: null,
+    };
+  }
+
+  // Direct Linking arrives with oid/affid. We store affid as sub1 and the SDK TID as sub2.
+  if (isEverflowDirectLink(searchParams)) {
+    return {
+      source: "network",
+      sub1: affid,
+      sub2: everflowTransactionId,
+      adaccountName,
+    };
+  }
+
+  // Everything else, including no params, is internal traffic by business rule.
+  return {
+    source: "internal",
+    sub1: null,
+    sub2: null,
+    adaccountName,
+  };
+}
+
 type IulV6ClientProps = {
   initialPrelandName?: string | null;
 };
@@ -862,6 +1068,8 @@ export default function IulV6Client({ initialPrelandName }: IulV6ClientProps) {
   const trackedStepsRef = useRef<Set<string>>(new Set());
   const trackedAutoZipRef = useRef(false);
   const submittedLeadRef = useRef(false);
+  const everflowClickRequestedRef = useRef(false);
+  const everflowTransactionPromiseRef = useRef<Promise<string | null> | null>(null);
   const leadUrlRef = useRef("");
   const runtimeConfigRef = useRef<RuntimeConfig>(defaultRuntimeConfig);
 
@@ -943,6 +1151,22 @@ export default function IulV6Client({ initialPrelandName }: IulV6ClientProps) {
   useEffect(() => {
     leadUrlRef.current = window.location.href;
   }, []);
+
+  useEffect(() => {
+    if (currentStep !== "age" || everflowClickRequestedRef.current) return;
+
+    const searchParams = new URLSearchParams(window.location.search);
+    if (!isEverflowDirectLink(searchParams)) return;
+
+    everflowClickRequestedRef.current = true;
+
+    everflowTransactionPromiseRef.current = requestEverflowDirectLinkTransaction(searchParams);
+
+    void everflowTransactionPromiseRef.current.catch((error) => {
+      // Attribution is best-effort; a failed SDK request should not block the lead.
+      console.error("Everflow direct-link click failed", error);
+    });
+  }, [currentStep]);
 
   useEffect(() => {
     if (hasAgeRejectedCookie()) {
@@ -1646,9 +1870,9 @@ export default function IulV6Client({ initialPrelandName }: IulV6ClientProps) {
       setAnswers(completedAnswers);
 
       const urlParams = new URLSearchParams(window.location.search);
-      const sub1 = urlParams.get("sub1")?.trim() || "";
-      const sub2 = urlParams.get("sub2")?.trim() || "";
-      const adaccountName = urlParams.get("adaccount_name")?.trim() || "";
+      // Do not wait for Everflow during submit. The click request starts on the age
+      // step and keeps resolving in the background while the user advances.
+      const trafficAttribution = resolveTrafficAttribution(urlParams);
       const cleanedAnswers = Object.fromEntries(
         Object.entries({
           ageGroup: completedAnswers.ageGroup,
@@ -1660,8 +1884,6 @@ export default function IulV6Client({ initialPrelandName }: IulV6ClientProps) {
           email: completedAnswers.email.trim(),
           locationText: completedAnswers.locationText,
           zipCode: completedAnswers.zipCode,
-          sub1,
-          sub2,
         }).filter(([, value]) => value !== "" && value != null)
       );
       const preparedLeadToken = await prepareLeadToken();
@@ -1681,7 +1903,8 @@ export default function IulV6Client({ initialPrelandName }: IulV6ClientProps) {
             deviceId: getOrCreateDeviceId(),
             trustedFormCertUrl: getTrustedFormCertUrl(),
             salePath: shouldUsePayPerCallThankYou ? "call" : "lead",
-            adaccountName,
+            adaccountName: trafficAttribution.adaccountName || "",
+            trafficAttribution,
             leadUrl: leadUrlRef.current || window.location.href,
           },
         }),

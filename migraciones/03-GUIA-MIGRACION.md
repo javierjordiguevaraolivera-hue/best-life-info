@@ -517,7 +517,7 @@ El destino necesita:
 - `app/api/call-attribution/route.ts`.
 - `lib/supabase/admin`.
 - Tabla `ringba_call_events`.
-- Tabla configurable `SUPABASE_LEAD_METADATA_TABLE` o `lead_metadata`.
+- Tabla `lead_metadata`.
 - Credenciales server-side de Supabase.
 
 Si el otro proyecto no usa Supabase, conservar el contrato HTTP y adaptar solo la

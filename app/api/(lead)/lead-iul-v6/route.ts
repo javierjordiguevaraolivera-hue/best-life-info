@@ -12,6 +12,12 @@ type LeadPayload = {
     trustedFormCertUrl?: string;
     salePath?: "lead" | "call";
     adaccountName?: string;
+    trafficAttribution?: {
+      source?: unknown;
+      sub1?: unknown;
+      sub2?: unknown;
+      adaccountName?: unknown;
+    };
     leadUrl?: string;
   };
 };
@@ -201,14 +207,18 @@ function getLeadLanguage() {
   return value === "en" || value === "es" ? value : null;
 }
 
-function getLeadSource() {
-  const value = process.env.NEXT_PUBLIC_LEAD_SOURCE?.trim().toLowerCase();
-  return value === "network" || value === "internal" ? value : null;
-}
-
 function getLeadDomain() {
   const value = process.env.NEXT_PUBLIC_LEAD_DOMAIN?.trim().toLowerCase();
   return value || null;
+}
+
+function normalizeNullableString(value: unknown) {
+  const normalized = normalizeString(value);
+  return normalized || null;
+}
+
+function normalizeTrafficSource(value: unknown) {
+  return normalizeString(value).toLowerCase() === "network" ? "network" : "internal";
 }
 
 function isTrustedFormCertUrl(value: string) {
@@ -419,7 +429,12 @@ export async function POST(request: Request) {
   const phoneValidation = validateUsPhone(body.answers.phoneNumber);
   const deviceId = String(body.meta?.deviceId || getRequestCookie(request, deviceCookieName)).trim();
   const trustedFormCertUrl = normalizeString(body.meta?.trustedFormCertUrl);
-  const adaccountName = normalizeString(body.meta?.adaccountName);
+  // Traffic attribution is resolved client-side from the landing URL rules.
+  // The server still normalizes it so empty values become null in Supabase.
+  const trafficAttribution = body.meta?.trafficAttribution;
+  const adaccountName =
+    normalizeNullableString(trafficAttribution?.adaccountName) ??
+    normalizeNullableString(body.meta?.adaccountName);
   const leadUrl = normalizeString(body.meta?.leadUrl);
   const userAgent = normalizeString(request.headers.get("user-agent"));
   const now = Date.now();
@@ -454,7 +469,9 @@ export async function POST(request: Request) {
   }
 
   const restAnswers = Object.fromEntries(
-    Object.entries(cleanedAnswers).filter(([key]) => key !== "phoneNumber")
+    Object.entries(cleanedAnswers).filter(
+      ([key]) => !["phoneNumber", "source", "sub1", "sub2"].includes(key),
+    )
   );
   const submittedAt = new Date().toISOString();
   const funnelId = getFunnelId(body.page);
@@ -463,10 +480,11 @@ export async function POST(request: Request) {
   const salePath = body.meta?.salePath === "call" ? "call" : "lead";
   const leadStatus = salePath === "call" ? "pending_call" : "ready_for_sell";
   const leadLanguage = getLeadLanguage();
-  const leadSource = getLeadSource();
   const leadDomain = getLeadDomain();
-  const sub1 = normalizeString(restAnswers.sub1);
-  const sub2 = normalizeString(restAnswers.sub2);
+  // Never read source/sub IDs from env vars here; URL attribution decides them.
+  const leadSource = normalizeTrafficSource(trafficAttribution?.source);
+  const sub1 = normalizeNullableString(trafficAttribution?.sub1);
+  const sub2 = normalizeNullableString(trafficAttribution?.sub2);
   const lead = {
     submittedAt,
     source: "best-life-next-iul-v6",
@@ -477,7 +495,7 @@ export async function POST(request: Request) {
     domain: leadDomain,
     sub1,
     sub2,
-    adaccountName: adaccountName || null,
+    adaccountName,
     ipAddress: requestIp,
     userAgent: userAgent || null,
     geolocation: geo,
@@ -496,10 +514,8 @@ export async function POST(request: Request) {
       flags: riskFlags,
     },
   };
-  const tableName = process.env.SUPABASE_LEADS_TABLE?.trim() || "leads";
-  const metadataTableName = process.env.SUPABASE_LEAD_METADATA_TABLE?.trim() || "lead_metadata";
   const { data, error } = await supabase
-    .from(tableName)
+    .from("leads")
     .insert({
       funnel_id: funnelId,
       age_group: normalizeString(restAnswers.ageGroup),
@@ -515,8 +531,8 @@ export async function POST(request: Request) {
       language: leadLanguage,
       source: leadSource,
       domain: leadDomain,
-      sub1: sub1 || null,
-      sub2: sub2 || null,
+      sub1,
+      sub2,
     })
     .select("lead_id")
     .single();
@@ -530,7 +546,7 @@ export async function POST(request: Request) {
   }
 
   const { error: metadataError } = await supabase
-    .from(metadataTableName)
+    .from("lead_metadata")
     .insert({
       lead_id: data.lead_id,
       application_id: buildApplicationNumber(data.lead_id),
@@ -542,7 +558,7 @@ export async function POST(request: Request) {
       device_id: deviceId || null,
       validation: lead.validation,
       risk_flags: riskFlags,
-      adaccount_name: adaccountName || null,
+      adaccount_name: adaccountName,
       lead_url: leadUrl || null,
       payload: lead,
     });
@@ -565,7 +581,7 @@ export async function POST(request: Request) {
     waitUntil(
       claimTrustedFormAndUpdateLead({
         supabase,
-        metadataTableName,
+        metadataTableName: "lead_metadata",
         leadId: data.lead_id,
         certUrl: trustedFormCertUrl,
         email: normalizeString(restAnswers.email),
