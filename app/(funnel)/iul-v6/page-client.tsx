@@ -1174,6 +1174,19 @@ export default function IulV6Client({ initialPrelandName }: IulV6ClientProps) {
   }, [currentStep]);
 
   useEffect(() => {
+    if (!isPrelandActive || trackedStepsRef.current.has("preland")) return;
+
+    trackedStepsRef.current.add("preland");
+    trackFunnelEvent("PageView", {
+      ...getAnalyticsLeadPayload(),
+      event_id: createEventId("preland"),
+      step: "preland",
+      step_number: 0,
+      preland_name: activePrelandName || undefined,
+    });
+  }, [activePrelandName, isPrelandActive]);
+
+  useEffect(() => {
     if (hasAgeRejectedCookie()) {
       setCurrentStep("rejected");
     }
@@ -1490,6 +1503,15 @@ export default function IulV6Client({ initialPrelandName }: IulV6ClientProps) {
     if (currentStep !== "state" || shouldAskZipCode) return;
     if (!trackedAutoZipRef.current) {
       trackedAutoZipRef.current = true;
+      // ZIP can be skipped when location is already inferred; still record the
+      // canonical `zip` step so PostHog has the full funnel sequence.
+      trackFunnelEvent("ViewContent", {
+        ...getAnalyticsLeadPayload(),
+        event_id: createEventId("viewcontent"),
+        step: "zip",
+        step_number: 3,
+        zip_detected: true,
+      });
     }
     transitionTo("name", "forward");
   }, [answers.zipCode, currentStep, detectedUsState, isPrelandActive, isRejectedPage, resolvedUsState, shouldAskZipCode]);
@@ -1621,6 +1643,14 @@ export default function IulV6Client({ initialPrelandName }: IulV6ClientProps) {
 
     if (field === "insuranceGoal" && nextStep === "name" && !trackedAutoZipRef.current) {
       trackedAutoZipRef.current = true;
+      // Same auto-skip path as above, but triggered from the goal answer.
+      trackFunnelEvent("ViewContent", {
+        ...getAnalyticsLeadPayload(),
+        event_id: createEventId("viewcontent"),
+        step: "zip",
+        step_number: 3,
+        zip_detected: true,
+      });
     }
 
     setAnswers((prev) => ({ ...prev, [field]: value }));
