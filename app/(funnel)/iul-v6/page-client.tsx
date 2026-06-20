@@ -174,6 +174,21 @@ type ZipLookupResponse = {
   fallback?: boolean;
 };
 
+type PhoneVerifyResponse = {
+  ok?: boolean;
+  normalized?: string;
+  reason?: string | null;
+  flags?: string[];
+  verificationToken?: string | null;
+  veriphone?: {
+    phone_valid?: boolean;
+    phone_type?: string;
+    carrier?: string;
+    country_code?: string;
+    e164?: string;
+  } | null;
+};
+
 type RuntimeConfig = {
   payPerCallStatus: string;
   payPerCallStartTime: string;
@@ -386,31 +401,11 @@ function setAgeRejectedCookie() {
   document.cookie = `${ageRejectedCookieName}=true; Max-Age=${maxAge}; Path=/; SameSite=Lax`;
 }
 
-function getPhoneValidationMessage(value: string) {
+function getPhoneLengthValidationMessage(value: string) {
   const digits = normalizeUsPhoneInput(value);
 
   if (digits.length !== 10) {
-    return "Ingresa un número válido de EE.UU. con 10 dígitos.";
-  }
-
-  if (!/^[2-9]\d{2}[2-9]\d{6}$/.test(digits)) {
-    return "Ingresa un número real de EE.UU.";
-  }
-
-  return "";
-
-  if (
-    digits === "0123456789" ||
-    digits === "1234567890" ||
-    digits === "9876543210" ||
-    /^(\d)\1{9}$/.test(digits) ||
-    /^(\d{2})\1{4}$/.test(digits) ||
-    /^(\d{5})\1$/.test(digits) ||
-    digits.split("").filter((digit) => digit === "0").length >= 7 ||
-    digits.slice(0, 3) === "555" ||
-    digits.slice(3, 6) === "555"
-  ) {
-    return "Ingresa un número real de EE.UU. Evita secuencias o números de ejemplo.";
+    return "Ingresa un numero valido de EE.UU. con 10 digitos.";
   }
 
   return "";
@@ -1060,6 +1055,8 @@ export default function IulV6Client({ initialPrelandName }: IulV6ClientProps) {
   const [submitError, setSubmitError] = useState("");
   const [isSubmittingLead, setIsSubmittingLead] = useState(false);
   const [isPhoneValidating, setIsPhoneValidating] = useState(false);
+  const [verifiedPhone, setVerifiedPhone] = useState("");
+  const [phoneVerificationData, setPhoneVerificationData] = useState<PhoneVerifyResponse | null>(null);
   const [hasBlurredPhone, setHasBlurredPhone] = useState(false);
   const [leadToken, setLeadToken] = useState("");
   const [isPayPerCallPopupOpen, setIsPayPerCallPopupOpen] = useState(false);
@@ -1075,6 +1072,7 @@ export default function IulV6Client({ initialPrelandName }: IulV6ClientProps) {
   const submittedLeadRef = useRef(false);
   const everflowClickRequestedRef = useRef(false);
   const everflowTransactionPromiseRef = useRef<Promise<string | null> | null>(null);
+  const phoneVerificationRequestRef = useRef(0);
   const leadUrlRef = useRef("");
   const runtimeConfigRef = useRef<RuntimeConfig>(defaultRuntimeConfig);
 
@@ -1108,17 +1106,21 @@ export default function IulV6Client({ initialPrelandName }: IulV6ClientProps) {
     : "animate-[survey-question-in_0.42s_cubic-bezier(0.22,0.61,0.36,1)]";
 
   const normalizedPhone = normalizeUsPhoneInput(answers.phoneNumber);
+  const hasCompletePhone = normalizedPhone.length === 10;
+  const isPhoneVerified = hasCompletePhone && verifiedPhone === normalizedPhone && !phoneError;
   const shouldShowPhoneValidation = normalizedPhone.length >= 10 || (hasBlurredPhone && normalizedPhone.length > 0);
   const livePhoneValidationMessage = shouldShowPhoneValidation
-    ? getPhoneValidationMessage(normalizedPhone)
+    ? getPhoneLengthValidationMessage(normalizedPhone)
     : "";
   const phoneValidationStatus: PhoneValidationStatus = !shouldShowPhoneValidation
     ? "idle"
-    : isPhoneValidating
+    : isPhoneValidating || (hasCompletePhone && !isPhoneVerified && !phoneError)
       ? "validating"
       : livePhoneValidationMessage
         ? "invalid"
-        : "valid";
+        : isPhoneVerified
+          ? "valid"
+          : "invalid";
   const phoneBorderClass =
     phoneValidationStatus === "invalid" || phoneError
       ? "border-[#e11d48] focus:border-[#e11d48]"
@@ -1251,18 +1253,73 @@ export default function IulV6Client({ initialPrelandName }: IulV6ClientProps) {
       phoneValidationTimeoutRef.current = null;
     }
 
-    if (!shouldShowPhoneValidation) {
+    if (!hasCompletePhone) {
       setIsPhoneValidating(false);
-      setPhoneError("");
+      setVerifiedPhone("");
+      setPhoneVerificationData(null);
+      setPhoneError(hasBlurredPhone && normalizedPhone.length > 0 ? getPhoneLengthValidationMessage(normalizedPhone) : "");
+      return;
+    }
+
+    if (verifiedPhone === normalizedPhone) {
+      setIsPhoneValidating(false);
       return;
     }
 
     setIsPhoneValidating(true);
+    setPhoneError("");
     phoneValidationTimeoutRef.current = window.setTimeout(() => {
+      const requestId = phoneVerificationRequestRef.current + 1;
+      phoneVerificationRequestRef.current = requestId;
       phoneValidationTimeoutRef.current = null;
-      setIsPhoneValidating(false);
-      setPhoneError(getPhoneValidationMessage(normalizedPhone));
-    }, 420);
+
+      void fetch("/api/phone-verify", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ phone: normalizedPhone }),
+        cache: "no-store",
+      })
+        .then(async (response) => {
+          const data = (await response.json().catch(() => null)) as PhoneVerifyResponse | null;
+          if (phoneVerificationRequestRef.current !== requestId) return;
+
+          setPhoneVerificationData(data);
+          setIsPhoneValidating(false);
+
+          trackFunnelEvent("PhoneValidation", {
+            event_id: createEventId("phone_validation"),
+            funnel_id: "iul-v6",
+            step: "contact",
+            step_number: 5,
+            phone_number: normalizedPhone,
+            email: lowerAnalyticsValue(answers.email),
+            validation_passed: Boolean(response.ok && data?.ok),
+            validation_reason: data?.reason || undefined,
+            phone_type: data?.veriphone?.phone_type || undefined,
+            carrier: data?.veriphone?.carrier || undefined,
+            country_code: data?.veriphone?.country_code || undefined,
+            e164: data?.veriphone?.e164 || undefined,
+          });
+
+          if (response.ok && data?.ok) {
+            setVerifiedPhone(normalizedPhone);
+            setPhoneError("");
+            return;
+          }
+
+          setVerifiedPhone("");
+          setPhoneError(data?.reason || "Ingresa un numero movil valido de EE.UU.");
+        })
+        .catch(() => {
+          if (phoneVerificationRequestRef.current !== requestId) return;
+          setPhoneVerificationData(null);
+          setVerifiedPhone("");
+          setIsPhoneValidating(false);
+          setPhoneError("No pudimos verificar el numero ahora mismo.");
+        });
+    }, 350);
 
     return () => {
       if (phoneValidationTimeoutRef.current !== null) {
@@ -1270,7 +1327,7 @@ export default function IulV6Client({ initialPrelandName }: IulV6ClientProps) {
         phoneValidationTimeoutRef.current = null;
       }
     };
-  }, [normalizedPhone, shouldShowPhoneValidation]);
+  }, [answers.email, hasBlurredPhone, hasCompletePhone, normalizedPhone, verifiedPhone]);
 
   useEffect(() => {
     if (isPrelandActive || isRejectedPage || currentQuestionIndex < 0) return;
@@ -1767,9 +1824,53 @@ export default function IulV6Client({ initialPrelandName }: IulV6ClientProps) {
 
     if (!answers.firstName.trim() || !answers.lastName.trim()) return;
 
-    const phoneValidationMessage = getPhoneValidationMessage(normalizedPhone);
+    const phoneValidationMessage = getPhoneLengthValidationMessage(normalizedPhone);
     if (phoneValidationMessage) {
       setPhoneError(phoneValidationMessage);
+      trackFunnelEvent("PhoneValidation", {
+        event_id: createEventId("phone_validation"),
+        funnel_id: "iul-v6",
+        step: "contact",
+        step_number: 5,
+        phone_number: normalizedPhone,
+        email: lowerAnalyticsValue(answers.email),
+        validation_passed: false,
+        validation_reason: phoneValidationMessage,
+      });
+      return;
+    }
+
+    if (isPhoneValidating) {
+      const validationReason = "Estamos verificando tu numero. Espera un momento.";
+      setPhoneError(validationReason);
+      trackFunnelEvent("PhoneValidation", {
+        event_id: createEventId("phone_validation"),
+        funnel_id: "iul-v6",
+        step: "contact",
+        step_number: 5,
+        phone_number: normalizedPhone,
+        email: lowerAnalyticsValue(answers.email),
+        validation_passed: false,
+        validation_reason: validationReason,
+      });
+      return;
+    }
+
+    if (!isPhoneVerified) {
+      const validationReason = phoneVerificationData?.reason || "Ingresa un numero movil valido de EE.UU.";
+      setPhoneError(validationReason);
+      trackFunnelEvent("PhoneValidation", {
+        event_id: createEventId("phone_validation"),
+        funnel_id: "iul-v6",
+        step: "contact",
+        step_number: 5,
+        phone_number: normalizedPhone,
+        email: lowerAnalyticsValue(answers.email),
+        validation_passed: false,
+        validation_reason: validationReason,
+        phone_type: phoneVerificationData?.veriphone?.phone_type || undefined,
+        carrier: phoneVerificationData?.veriphone?.carrier || undefined,
+      });
       return;
     }
 
@@ -1924,6 +2025,8 @@ export default function IulV6Client({ initialPrelandName }: IulV6ClientProps) {
             salePath: shouldUsePayPerCallThankYou ? "call" : "lead",
             adaccountName: trafficAttribution.adaccountName || "",
             trafficAttribution,
+            phoneVerification: phoneVerificationData,
+            phoneVerificationToken: phoneVerificationData?.verificationToken || null,
             leadUrl: leadUrlRef.current || window.location.href,
           },
         }),
@@ -2560,11 +2663,14 @@ export default function IulV6Client({ initialPrelandName }: IulV6ClientProps) {
                     name="tel"
                     value={formatPhoneDigits(answers.phoneNumber)}
                     onChange={(event) => {
+                      const nextPhone = normalizeUsPhoneInput(event.target.value);
                       setAnswers((prev) => ({
                         ...prev,
-                        phoneNumber: normalizeUsPhoneInput(event.target.value),
+                        phoneNumber: nextPhone,
                       }));
                       setHasBlurredPhone(false);
+                      setVerifiedPhone("");
+                      setPhoneVerificationData(null);
                       setPhoneError("");
                     }}
                     onInput={(event) => {
@@ -2576,6 +2682,8 @@ export default function IulV6Client({ initialPrelandName }: IulV6ClientProps) {
                         }));
                       }
                       setHasBlurredPhone(false);
+                      setVerifiedPhone("");
+                      setPhoneVerificationData(null);
                       setPhoneError("");
                     }}
                     onBlur={() => setHasBlurredPhone(true)}
@@ -2631,7 +2739,7 @@ export default function IulV6Client({ initialPrelandName }: IulV6ClientProps) {
                 type="submit"
                 name="submit-lead"
                 data-tf-element-role="submit"
-                disabled={isSubmittingLead}
+                disabled={isSubmittingLead || isPhoneValidating || !isPhoneVerified}
                 className="inline-flex h-[54px] items-center justify-center gap-2 rounded-full bg-[var(--brand)] px-6 text-[18px] font-semibold text-white transition disabled:cursor-wait disabled:opacity-70 hover:bg-[var(--brand-dark)]"
               >
                 <span>Ver mi cotización ahora</span>

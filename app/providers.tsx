@@ -30,10 +30,17 @@ export function PostHogProvider({ children }: { children: React.ReactNode }) {
     // PostHog owns analytics now. Pageviews are captured manually above so we
     // can keep route-change behavior explicit in the App Router.
     posthog.init(posthogKey, {
-      api_host: process.env.NEXT_PUBLIC_POSTHOG_HOST || "https://us.i.posthog.com",
+      // Managed reverse proxy configured in PostHog for best-life.info.
+      api_host: process.env.NEXT_PUBLIC_POSTHOG_HOST || "https://t.best-life.info",
+      defaults: "2026-05-30",
       person_profiles: "identified_only",
       capture_pageview: false,
       capture_pageleave: true,
+      session_recording: {
+        // The funnel team needs phone/email visible in recordings to diagnose
+        // invalid-lead drop-offs. Do not add `ph-mask` to these inputs.
+        maskAllInputs: false,
+      },
     });
   }, []);
 

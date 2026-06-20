@@ -2,6 +2,13 @@ import { geolocation, ipAddress, waitUntil } from "@vercel/functions";
 import { NextResponse } from "next/server";
 import { leadTokenCookieName } from "@/app/api/(lead)/lead-token/route";
 import { buildApplicationNumber } from "@/lib/application-number";
+import {
+  getPhoneLengthMessage,
+  isVeriphoneMobileResult,
+  normalizeUsPhone,
+  type VeriphoneResponse,
+  verifyPhoneVerificationToken,
+} from "@/lib/phone-verification";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
 type LeadPayload = {
@@ -18,15 +25,10 @@ type LeadPayload = {
       sub2?: unknown;
       adaccountName?: unknown;
     };
+    phoneVerification?: VeriphoneResponse | null;
+    phoneVerificationToken?: unknown;
     leadUrl?: string;
   };
-};
-
-type PhoneValidationResult = {
-  isValid: boolean;
-  normalized: string;
-  flags: string[];
-  reason?: string;
 };
 
 type TrustedFormClaimResult = {
@@ -173,14 +175,6 @@ function getRequestCookie(request: Request, name: string) {
   if (!cookie) return "";
 
   return decodeURIComponent(cookie.slice(name.length + 1));
-}
-
-function normalizeUsPhone(value: unknown) {
-  const digits = String(value || "").replace(/\D/g, "");
-  if (digits.length === 11 && digits.startsWith("1")) {
-    return digits.slice(1);
-  }
-  return digits;
 }
 
 function normalizeString(value: unknown) {
@@ -339,68 +333,6 @@ async function claimTrustedFormAndUpdateLead({
   }
 }
 
-function isSequential(digits: string) {
-  return digits === "0123456789" || digits === "1234567890" || digits === "9876543210";
-}
-
-function isRepeatingPattern(digits: string) {
-  return /^(\d)\1{9}$/.test(digits) || /^(\d{2})\1{4}$/.test(digits) || /^(\d{5})\1$/.test(digits);
-}
-
-function validateUsPhone(value: unknown): PhoneValidationResult {
-  const normalized = normalizeUsPhone(value);
-  const flags: string[] = [];
-
-  if (normalized.length !== 10) {
-    return {
-      isValid: false,
-      normalized,
-      flags: ["invalid_length"],
-      reason: "Ingresa un numero valido de EE.UU. con 10 digitos.",
-    };
-  }
-
-  const areaCode = normalized.slice(0, 3);
-  const exchange = normalized.slice(3, 6);
-
-  if (!/^[2-9]\d{2}[2-9]\d{6}$/.test(normalized)) {
-    return {
-      isValid: false,
-      normalized,
-      flags: ["invalid_nanp"],
-      reason: "Ingresa un numero movil o residencial valido de EE.UU.",
-    };
-  }
-
-  if (areaCode.endsWith("11") || exchange.endsWith("11")) {
-    flags.push("service_code_pattern");
-  }
-
-  if (areaCode === "555" || exchange === "555") {
-    flags.push("fictional_555");
-  }
-
-  if (isSequential(normalized)) {
-    flags.push("sequential_digits");
-  }
-
-  if (isRepeatingPattern(normalized)) {
-    flags.push("repeating_digits");
-  }
-
-  const zeroCount = normalized.split("").filter((digit) => digit === "0").length;
-  if (zeroCount >= 7) {
-    flags.push("too_many_zeros");
-  }
-
-  const tail = normalized.slice(4);
-  if (/^12345|23456|34567|45678|56789|67890$/.test(tail)) {
-    flags.push("synthetic_tail");
-  }
-
-  return { isValid: true, normalized, flags };
-}
-
 export async function POST(request: Request) {
   if (!isAllowedOrigin(request) || !hasValidLeadToken(request)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
@@ -426,7 +358,40 @@ export async function POST(request: Request) {
     ipAddress(request) ||
     request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
     "unknown";
-  const phoneValidation = validateUsPhone(body.answers.phoneNumber);
+  const normalizedPhone = normalizeUsPhone(body.answers.phoneNumber);
+  const phoneLengthMessage = getPhoneLengthMessage(normalizedPhone);
+  const phoneVerification = body.meta?.phoneVerification || null;
+  const isVerifiedMobile = !!phoneVerification && isVeriphoneMobileResult(phoneVerification);
+  const phoneVerificationMatches =
+    normalizeUsPhone(phoneVerification?.phone || phoneVerification?.e164 || normalizedPhone) === normalizedPhone;
+  const hasVerifiedPhoneToken = verifyPhoneVerificationToken(
+    body.meta?.phoneVerificationToken,
+    normalizedPhone,
+  );
+  // Veriphone is called by /api/phone-verify as soon as the contact step has 10 digits.
+  // The signed token proves that result came from our server without spending a second API lookup.
+  const phoneValidationFlags = [
+    ...(phoneLengthMessage ? ["invalid_length"] : []),
+    ...(phoneVerification ? [] : ["veriphone_missing_result"]),
+    ...(isVerifiedMobile ? [] : ["veriphone_unverified_mobile"]),
+    ...(phoneVerificationMatches ? [] : ["veriphone_phone_mismatch"]),
+    ...(hasVerifiedPhoneToken ? [] : ["veriphone_missing_or_expired_token"]),
+  ];
+  const phoneValidation = {
+    isValid:
+      !phoneLengthMessage &&
+      isVerifiedMobile &&
+      phoneVerificationMatches &&
+      hasVerifiedPhoneToken,
+    normalized: normalizedPhone,
+    reason:
+      phoneLengthMessage ||
+      (!phoneVerification
+        ? "Espera a que terminemos de verificar el numero."
+        : "Ingresa un numero movil valido de EE.UU."),
+    flags: phoneValidationFlags,
+    veriphone: phoneVerification,
+  };
   const deviceId = String(body.meta?.deviceId || getRequestCookie(request, deviceCookieName)).trim();
   const trustedFormCertUrl = normalizeString(body.meta?.trustedFormCertUrl);
   // Traffic attribution is resolved client-side from the landing URL rules.
@@ -514,6 +479,7 @@ export async function POST(request: Request) {
       ipVelocityCount,
       deviceVelocityCount,
       flags: riskFlags,
+      veriphone: phoneValidation.veriphone || null,
     },
   };
   const { data, error } = await supabase
@@ -559,6 +525,9 @@ export async function POST(request: Request) {
       geolocation: geo,
       device_id: deviceId || null,
       validation: lead.validation,
+      // Guarda el ultimo payload de Veriphone asociado al telefono aceptado en este submit.
+      // Si el usuario cambia el numero y vuelve a verificar, el frontend manda el ultimo resultado.
+      veriphone: phoneValidation.veriphone || null,
       risk_flags: riskFlags,
       adaccount_name: adaccountName,
       lead_url: leadUrl || null,

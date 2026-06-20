@@ -40,12 +40,13 @@ function normalizeIulV6Step(value: unknown) {
 function getPostHogEventName(event: string) {
   if (event === "Lead") return "funnel_submitted";
   if (event === "Contact") return "funnel_contact_clicked";
+  if (event === "PhoneValidation") return "phone_validation_completed";
   return "funnel_step_viewed";
 }
 
 function getPostHogStep(event: string, payload: AnalyticsEventPayload) {
   if (event === "Lead") return "submit";
-  if (event === "Contact") return "contact";
+  if (event === "Contact" || event === "PhoneValidation") return "contact";
   return normalizeIulV6Step(payload.step);
 }
 
