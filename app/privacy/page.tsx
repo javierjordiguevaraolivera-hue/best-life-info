@@ -250,8 +250,8 @@ export default function PrivacyPage() {
               Si tienes preguntas sobre esta Política de Privacidad o nuestras
               prácticas de información, puedes contactarnos en:
             </p>
-            <p className="mt-3">Website: www.bestlife.com</p>
-            <p className="mt-3">Email: info@bestlife.com</p>
+            <p className="mt-3">Website: este sitio web</p>
+            <p className="mt-3">Email: disponible bajo solicitud</p>
           </section>
         </div>
       </section>

@@ -9,8 +9,16 @@ import {
   User,
   Zap,
 } from "lucide-react";
+import type { Metadata } from "next";
 import { Suspense } from "react";
-import VercelThankYouTracker from "../vercel-thank-you-tracker";
+import VercelThankYouTracker from "../_components/vercel-thank-you-tracker";
+
+export const metadata: Metadata = {
+  robots: {
+    index: false,
+    follow: false,
+  },
+};
 
 const thankYouHighlights = [
   {

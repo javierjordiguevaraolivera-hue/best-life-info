@@ -1,29 +1,38 @@
 "use client";
 
-/**
- * Archived funnel reference for internal reuse.
- *
- * Required runtime endpoints:
- * - /api/lead
- * - /api/location
- * - /api/zip/[zip]
- *
- * Required public assets:
- * - /best-life-assets/*
- *
- * Notes:
- * - This file is intentionally self-contained.
- * - It keeps this funnel self-contained.
- */
-
 import Image from "next/image";
-import { usePathname } from "next/navigation";
-import { useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
+import { useEffect, useRef, useState } from "react";
+import PopUp1 from "@/components/pop-ups/pop-up1";
+import { getPrelandComponent } from "@/components/prelands";
+import { buildApplicationNumber } from "@/lib/application-number";
+import {
+  createEventId,
+  getUtmParams,
+  trackFunnelEvent,
+  trackVercelIulV6VirtualPage,
+} from "@/lib/analytics-events";
+import { inferUsZipFromStateAndPhone } from "@/lib/infer-us-zip";
 
-const trustBadges = [
-  { icon: "/best-life-assets/tax-free.svg", text: "Retiro libre de impuestos" },
-  { icon: "/best-life-assets/family-protection.svg", text: "Protege a tu familia" },
-  { icon: "/best-life-assets/minutes.svg", text: "Toma menos de 2 minutos" },
+const questionnaireSecuritySeals = [
+  {
+    src: "/best-life-assets/busines-acredited-bbb.avif",
+    alt: "BBB Accredited Business",
+    width: 112,
+    height: 38,
+  },
+  {
+    src: "/best-life-assets/secure-form-best-life2.png",
+    alt: "Secure Form",
+    width: 136,
+    height: 32,
+  },
+  {
+    src: "/best-life-assets/ssl-encription.avif",
+    alt: "SSL Encryption",
+    width: 112,
+    height: 38,
+  },
 ];
 
 const introBenefits = [
@@ -54,34 +63,6 @@ const introBenefits = [
   },
 ];
 
-const howItWorksSteps = [
-  { number: "1", title: "Te hacemos unas preguntas", description: "para verificar si calificas." },
-  { number: "2", title: "Revisamos tu perfil", description: "y estimamos tu beneficio IUL." },
-  { number: "3", title: "Accede a tu plan", description: "y recibe tu beneficio." },
-];
-
-const metrics = [
-  { value: "73,698", label: "Familias ayudadas en 2026" },
-  { value: "100%", label: "Beneficio familiar protegido" },
-  { value: "$200K+", label: "Potencial en valor acumulado" },
-];
-
-const footerLinks = [
-  { label: "About Us", href: "/" },
-  { label: "Cookie Policy", href: "/privacy" },
-  { label: "Terms Of Use", href: "/terms" },
-  { label: "Partner With Us", href: "/" },
-  { label: "Privacy Policy", href: "/privacy" },
-  { label: "Contact", href: "/" },
-  { label: "Sitemap", href: "/" },
-];
-
-const socialLinks = [
-  { label: "Facebook", href: "/", icon: "/best-life-assets/facebook.png" },
-  { label: "Instagram", href: "https://www.instagram.com/", icon: "/best-life-assets/instagram.png" },
-  { label: "LinkedIn", href: "/", icon: "/best-life-assets/linkedin.png" },
-];
-
 const ageOptions = ["25 a 34", "35 a 44", "45 a 54", "55 a 65", "65+"];
 const goalOptions = [
   "Seguro de vida",
@@ -99,8 +80,7 @@ const stateOptions = [
   "South Carolina", "South Dakota", "Tennessee", "Texas", "Utah", "Vermont",
   "Virginia", "Washington", "West Virginia", "Wisconsin", "Wyoming", "District of Columbia",
 ];
-
-const metaStateCodes: Record<string, string> = {
+const stateAbbreviations: Record<string, string> = {
   Alabama: "al",
   Alaska: "ak",
   Arizona: "az",
@@ -162,6 +142,7 @@ type FunnelStep =
   | "name"
   | "phone"
   | "email"
+  | "rejected"
   | "success";
 
 type FunnelAnswers = {
@@ -178,12 +159,22 @@ type FunnelAnswers = {
   detectedState: string;
 };
 
+type PhoneValidationStatus = "idle" | "validating" | "valid" | "invalid";
+
 type ZipLookupResponse = {
   location?: string | null;
   state?: string | null;
   zipCode?: string | null;
   source?: "zippopotam" | "vercel-ip" | "fallback";
   fallback?: boolean;
+};
+
+type RuntimeConfig = {
+  payPerCallStatus: string;
+  payPerCallStartTime: string;
+  payPerCallEndTime: string;
+  payPerCallPhoneNumber: string;
+  ringbaCampaignId: string;
 };
 
 const stepOrder: FunnelStep[] = [
@@ -209,6 +200,23 @@ const emptyAnswers: FunnelAnswers = {
   email: "",
   detectedState: "",
 };
+
+const deviceStorageKey = "best-life-iul-v6-device-id";
+const deviceCookieName = "bf_iul_device_id";
+const trustedFormScriptId = "trustedform-certify-sdk";
+const trustedFormFieldName = process.env.NEXT_PUBLIC_TRUSTEDFORM_FIELD || "xxTrustedFormCertUrl";
+const defaultRuntimeConfig = {
+  payPerCallStatus: "OFF",
+  payPerCallStartTime: "",
+  payPerCallEndTime: "",
+  payPerCallPhoneNumber: "",
+  ringbaCampaignId: "",
+};
+const deviceCookieDurationDays = 15;
+const ageRejectedCookieName = "bf_age_rejected_iul_v6";
+const ageRejectedCookieDurationDays = 90;
+const ageRejectedHash = "#no-califica";
+const blockedStateName = "New York";
 
 const thankYouHighlights = [
   {
@@ -282,16 +290,14 @@ const thankYouFaqs = [
       "No. Tenemos planes desde $100 hasta $5,000+ mensuales, adaptados a tu presupuesto.",
   },
   {
-    title: "¿Aplica para inmigrantes o residentes?",
+    title: "¿Aplica para residentes?",
     description:
-      "Sí. Muchos planes están disponibles independientemente del estatus migratorio. Tu asesor te explicará las opciones.",
+      "Sí. Muchos planes están disponibles independientemente del requisitos de residencia. Tu asesor te explicará las opciones.",
   },
 ];
 
-const deviceStorageKey = "best-life-device-id";
-
 function formatPhoneDigits(value: string) {
-  const digits = value.replace(/\D/g, "").slice(0, 10);
+  const digits = normalizeUsPhoneInput(value);
   const chunks = [];
   if (digits.length > 0) chunks.push(digits.slice(0, 3));
   if (digits.length > 3) chunks.push(digits.slice(3, 6));
@@ -299,12 +305,66 @@ function formatPhoneDigits(value: string) {
   return chunks.join(" ");
 }
 
-function isValidPhone(value: string) {
-  return getPhoneValidationMessage(value) === "";
+function normalizeUsPhoneInput(value: string) {
+  const digits = value.replace(/\D/g, "");
+
+  if (digits.length === 11 && digits.startsWith("1")) {
+    return digits.slice(1);
+  }
+
+  if (digits.length > 10 && digits.startsWith("1")) {
+    return digits.slice(1, 11);
+  }
+
+  return digits.slice(0, 10);
+}
+
+function getOrCreateDeviceId() {
+  if (typeof window === "undefined") return "";
+
+  const existing = window.localStorage.getItem(deviceStorageKey);
+  if (existing) {
+    setDeviceCookie(existing);
+    return existing;
+  }
+
+  const newId = `bm_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+  window.localStorage.setItem(deviceStorageKey, newId);
+  setDeviceCookie(newId);
+  return newId;
+}
+
+function getTrustedFormCertUrl() {
+  if (typeof document === "undefined") return "";
+
+  const field = document.getElementsByName(trustedFormFieldName)[0] as HTMLInputElement | undefined;
+  return field?.value?.trim() || "";
+}
+
+function setDeviceCookie(deviceId: string) {
+  if (typeof document === "undefined" || !deviceId) return;
+
+  const maxAge = deviceCookieDurationDays * 24 * 60 * 60;
+  document.cookie = `${deviceCookieName}=${encodeURIComponent(deviceId)}; Max-Age=${maxAge}; Path=/; SameSite=Lax`;
+}
+
+function hasAgeRejectedCookie() {
+  if (typeof document === "undefined") return false;
+  return document.cookie
+    .split(";")
+    .map((cookie) => cookie.trim())
+    .includes(`${ageRejectedCookieName}=true`);
+}
+
+function setAgeRejectedCookie() {
+  if (typeof document === "undefined") return;
+
+  const maxAge = ageRejectedCookieDurationDays * 24 * 60 * 60;
+  document.cookie = `${ageRejectedCookieName}=true; Max-Age=${maxAge}; Path=/; SameSite=Lax`;
 }
 
 function getPhoneValidationMessage(value: string) {
-  const digits = value.replace(/\D/g, "");
+  const digits = normalizeUsPhoneInput(value);
 
   if (digits.length !== 10) {
     return "Ingresa un número válido de EE.UU. con 10 dígitos.";
@@ -313,6 +373,8 @@ function getPhoneValidationMessage(value: string) {
   if (!/^[2-9]\d{2}[2-9]\d{6}$/.test(digits)) {
     return "Ingresa un número real de EE.UU.";
   }
+
+  return "";
 
   if (
     digits === "0123456789" ||
@@ -331,30 +393,8 @@ function getPhoneValidationMessage(value: string) {
   return "";
 }
 
-function getOrCreateDeviceId() {
-  if (typeof window === "undefined") return "";
-
-  const existing = window.localStorage.getItem(deviceStorageKey);
-  if (existing) return existing;
-
-  const newId = `bm_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
-  window.localStorage.setItem(deviceStorageKey, newId);
-  return newId;
-}
-
 function isValidEmail(value: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
-}
-
-function extractCityFromLocation(locationText: string) {
-  const normalized = locationText.trim();
-  if (!normalized) return "";
-  if (normalized.toLowerCase() === "rates available for your area") return "";
-  const [cityPart] = normalized.split(",");
-  const city = cityPart?.trim() || "";
-  if (!city) return "";
-  if (/area|rates available/i.test(city)) return "";
-  return city;
 }
 
 function normalizeZipCode(value: string) {
@@ -385,127 +425,24 @@ function isResolvedUsZip(
   );
 }
 
-function normalizeMetaText(value: string) {
-  return value
-    .trim()
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "");
+function isBlockedState(state?: string | null) {
+  return state === blockedStateName;
 }
 
-function normalizeMetaName(value: string) {
-  return normalizeMetaText(value).replace(/[^a-z]/g, "");
-}
-
-function normalizeMetaCity(value: string) {
-  return normalizeMetaText(value).replace(/[^a-z]/g, "");
-}
-
-function normalizeMetaEmail(value: string) {
-  return value.trim().toLowerCase();
-}
-
-function normalizeMetaPhone(value: string) {
-  const digits = value.replace(/\D/g, "");
-
-  if (digits.length === 10) {
-    return `1${digits}`;
-  }
-
-  if (digits.length === 11 && digits.startsWith("1")) {
-    return digits;
-  }
-
-  return digits;
-}
-
-function getAgeRangeMidpoint(ageGroup: string) {
-  switch (ageGroup) {
-    case "25 a 34":
-      return 30;
-    case "35 a 44":
-      return 40;
-    case "45 a 54":
-      return 50;
-    case "55 a 65":
-      return 60;
-    case "65+":
-      return 65;
-    default:
-      return undefined;
-  }
-}
-
-async function sha256Hex(value: string) {
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(value)
-  );
-
-  return Array.from(new Uint8Array(digest))
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
-}
-
-async function hashMetaFields(fields: Record<string, string>) {
-  const entries = await Promise.all(
-    Object.entries(fields).map(async ([key, value]) => [key, await sha256Hex(value)] as const)
-  );
-
-  return Object.fromEntries(entries);
-}
-
-async function buildMetaLeadTrackingData(args: {
-  answers: FunnelAnswers;
-  normalizedPhone: string;
-  deviceId: string;
-}) {
-  const stateName = args.answers.state || args.answers.detectedState;
-  const stateCode = metaStateCodes[stateName] || "";
-  const city = extractCityFromLocation(args.answers.locationText);
-  const zipCode = args.answers.zipCode.trim();
-  const userDataToHash = Object.fromEntries(
-    Object.entries({
-      em: normalizeMetaEmail(args.answers.email),
-      ph: normalizeMetaPhone(args.normalizedPhone),
-      fn: normalizeMetaName(args.answers.firstName),
-      ln: normalizeMetaName(args.answers.lastName),
-      ct: city ? normalizeMetaCity(city) : "",
-      st: stateCode,
-      zp: zipCode,
-      country: "us",
-      external_id: args.deviceId.trim().toLowerCase(),
-    }).filter(([, value]) => value)
-  ) as Record<string, string>;
-
-  const userData =
-    Object.keys(userDataToHash).length > 0
-      ? await hashMetaFields(userDataToHash)
-      : {};
-
-  const customData = Object.fromEntries(
-    Object.entries({
-      content_name: "iul_v2_lead",
-      lead_type: "iul",
-      status: "submitted",
-      age_range: args.answers.ageGroup,
-      age_range_midpoint: getAgeRangeMidpoint(args.answers.ageGroup),
-      insurance_goal: args.answers.insuranceGoal,
-      state: stateCode || stateName || undefined,
-      city: city || undefined,
-      zip_code: zipCode || undefined,
-      country: "us",
-    }).filter(([, value]) => value !== "" && value != null)
-  );
-
-  return { userData, customData };
+function buildLocationBackup(state?: string | null, phone?: string | null) {
+  const inferred = inferUsZipFromStateAndPhone(state, phone);
+  return {
+    zipCode: inferred.zipCode,
+    locationText: inferred.location,
+    state: inferred.state || state || "",
+  };
 }
 
 function optionButtonClass(isSelected: boolean, isRecommended = false) {
   return [
     "flex min-h-[62px] w-full items-center rounded-[16px] border bg-white px-5 text-left text-[17px] tracking-[-0.03em] text-[#101820] shadow-[0_4px_10px_rgba(16,24,32,0.08)] transition",
     isSelected
-      ? "border-[var(--brand)] shadow-[0_0_0_1px_var(--brand)]"
+      ? "border-[var(--brand)] bg-[#f3f8ff] shadow-[0_0_0_1px_var(--brand),0_8px_18px_rgba(26,115,232,0.12)]"
       : isRecommended
         ? "border-[#9ec5ff] bg-[#f7fbff] shadow-[0_0_0_1px_rgba(26,115,232,0.18),0_4px_10px_rgba(16,24,32,0.08)] hover:border-[#78adff]"
         : "border-[#9c9c9c] hover:border-[#6f6f6f]",
@@ -716,61 +653,6 @@ function QuestionIcon({ className = "h-[1em] w-[1em]" }: { className?: string })
   );
 }
 
-function IntroBenefitIcon({
-  icon,
-  className = "h-[26px] w-[26px]",
-}: {
-  icon: (typeof introBenefits)[number]["icon"];
-  className?: string;
-}) {
-  if (icon === "growth") {
-    return (
-      <svg aria-hidden="true" viewBox="0 0 24 24" className={className} fill="none">
-        <rect x="3.5" y="4.5" width="17" height="15" rx="3" fill="#ece7ff" />
-        <path d="M6.5 16.5 10 13l2.4 2.2 5.1-5.2" stroke="#3b82f6" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" />
-        <path d="M6.5 7.5v9M11.5 7.5v9M16.5 7.5v9" stroke="#c4b5fd" strokeWidth="1.2" strokeLinecap="round" />
-      </svg>
-    );
-  }
-
-  if (icon === "tax") {
-    return (
-      <svg aria-hidden="true" viewBox="0 0 24 24" className={className} fill="none">
-        <circle cx="12" cy="12" r="7.8" stroke="#ff4d67" strokeWidth="2.2" />
-        <path d="M7 7 17 17" stroke="#ff4d67" strokeWidth="2.2" strokeLinecap="round" />
-      </svg>
-    );
-  }
-
-  if (icon === "liquidity") {
-    return (
-      <svg aria-hidden="true" viewBox="0 0 24 24" className={className} fill="none">
-        <path d="M4 9.3 12 4l8 5.3" stroke="#8b7aa8" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
-        <path d="M5.5 10h13" stroke="#8b7aa8" strokeWidth="1.7" strokeLinecap="round" />
-        <path d="M7.2 10v7.3M12 10v7.3M16.8 10v7.3" stroke="#8b7aa8" strokeWidth="1.7" strokeLinecap="round" />
-        <path d="M4.5 18h15" stroke="#8b7aa8" strokeWidth="1.7" strokeLinecap="round" />
-      </svg>
-    );
-  }
-
-  if (icon === "protection") {
-    return (
-      <svg aria-hidden="true" viewBox="0 0 24 24" className={className} fill="none">
-        <path d="M12 3.8c2.8 1.9 5.8 2.4 8 2.5v6c0 4.5-3.2 7.9-8 9.5-4.8-1.6-8-5-8-9.5v-6c2.2-.1 5.2-.6 8-2.5Z" fill="#5bb2ff" stroke="#4477e6" strokeWidth="1.5" />
-      </svg>
-    );
-  }
-
-  return (
-    <svg aria-hidden="true" viewBox="0 0 24 24" className={className} fill="none">
-      <rect x="5" y="4.5" width="14" height="15" rx="2.5" fill="#f2e8ff" />
-      <path d="M12 7.2v5.4M9.3 9.9h5.4" stroke="#ff4db8" strokeWidth="1.8" strokeLinecap="round" />
-      <path d="M8.5 15.8h7" stroke="#c084fc" strokeWidth="1.6" strokeLinecap="round" />
-      <path d="M8.5 18.2h5.2" stroke="#c084fc" strokeWidth="1.6" strokeLinecap="round" />
-    </svg>
-  );
-}
-
 function PhonePadIcon({ className = "h-[1em] w-[1em]" }: { className?: string }) {
   return (
     <svg aria-hidden="true" viewBox="0 0 24 24" className={className} fill="none">
@@ -788,31 +670,206 @@ function PhonePadIcon({ className = "h-[1em] w-[1em]" }: { className?: string })
   );
 }
 
-export default function IulV2ExportPage() {
-  const pathname = usePathname();
-  const [currentStep, setCurrentStep] = useState<FunnelStep>("intro");
-  const [slideDirection, setSlideDirection] = useState<"forward" | "backward">("forward");
+function DialFingerIcon({ className = "h-[1em] w-[1em]" }: { className?: string }) {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24" className={className} fill="none">
+      <path d="M1.875 1.5a.375.375 0 1 0 .375.375.375.375 0 0 0-.375-.375h0" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" />
+      <line x1="7.125" y1="1.5" x2="7.125" y2="1.5" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" />
+      <path d="M7.125 1.5a.375.375 0 1 0 .375.375.375.375 0 0 0-.375-.375" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" />
+      <line x1="12.375" y1="1.5" x2="12.375" y2="1.5" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" />
+      <path d="M12.375 1.5a.375.375 0 1 0 .375.375.375.375 0 0 0-.375-.375" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" />
+      <line x1="1.875" y1="6.75" x2="1.875" y2="6.75" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" />
+      <path d="M1.875 6.75a.375.375 0 1 0 .375.375.375.375 0 0 0-.375-.375" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" />
+      <line x1="7.125" y1="6.75" x2="7.125" y2="6.75" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" />
+      <path d="M7.125 6.75a.375.375 0 1 0 .375.375.375.375 0 0 0-.375-.375" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" />
+      <line x1="1.875" y1="12" x2="1.875" y2="12" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" />
+      <path d="M1.875 12a.375.375 0 1 0 .375.375A.375.375 0 0 0 1.875 12" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" />
+      <line x1="7.125" y1="12" x2="7.125" y2="12" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" />
+      <path d="M7.125 12a.375.375 0 1 0 .375.375A.375.375 0 0 0 7.125 12" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" />
+      <path d="M6.75 22.5l-1.9-3.327A2.263 2.263 0 0 1 8.7 16.8l1.8 2.7V8.25a2.25 2.25 0 0 1 4.5 0V16.5h3.379A4.332 4.332 0 0 1 22.5 20.847V22.5" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" />
+    </svg>
+  );
+}
+
+function ShieldCheckIcon({ className = "h-[1em] w-[1em]" }: { className?: string }) {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 317.855 317.855" className={className} fill="currentColor">
+      <path d="M158.929 317.855c-1.029 0-2.059-.159-3.051-.477-33.344-10.681-61.732-31.168-84.377-60.891-17.828-23.401-32.103-52.526-42.426-86.566C11.661 112.506 11.461 61.358 11.461 59.209c0-5.15 3.912-9.459 9.039-9.954.772-.075 78.438-8.048 132.553-47.347 3.504-2.546 8.249-2.543 11.753.001C218.906 41.207 296.582 49.18 297.36 49.256c5.123.5 9.034 4.807 9.034 9.953 0 2.149-.2 53.297-17.613 110.713-10.324 34.04-24.598 63.165-42.426 86.566-22.644 29.723-51.032 50.21-84.376 60.891-.992.317-2.021.476-3.05.476zM31.748 67.982c.831 16.784 4.062 55.438 16.604 96.591 21.405 70.227 58.601 114.87 110.576 132.746 52.096-17.916 89.335-62.711 110.713-133.202 12.457-41.074 15.653-79.434 16.472-96.134-22.404-3.269-80.438-14.332-127.186-45.785C112.175 53.648 54.153 64.713 31.748 67.982z" />
+      <path d="M153.582 207.625c-2.372 0-4.68-.844-6.499-2.4l-36.163-30.926c-4.197-3.589-4.69-9.901-1.101-14.099 3.588-4.198 9.901-4.692 14.099-1.101l28.124 24.051 55.743-73.118c3.348-4.392 9.622-5.24 14.015-1.89 4.393 3.348 5.238 9.623 1.89 14.015l-62.155 81.53c-1.667 2.187-4.16 3.591-6.895 3.882-.353.037-.706.056-1.058.056z" />
+    </svg>
+  );
+}
+
+function StatisticGrowIcon({ className = "h-[1em] w-[1em]" }: { className?: string }) {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24" className={className} fill="currentColor">
+      <path d="M22 5v5a1 1 0 0 1-2 0V7.41l-5.29 5.3a1 1 0 0 1-1.16.18l-5.29-2.64-4.49 5.39A1 1 0 0 1 3 16a1 1 0 0 1-.64-.23 1 1 0 0 1-.13-1.41l5-6a1 1 0 0 1 1.22-.25l5.35 2.67L18.59 6H16a1 1 0 0 1 0-2h5a1 1 0 0 1 .38.08 1 1 0 0 1 .54.54A1 1 0 0 1 22 5ZM21 18H3a1 1 0 0 0 0 2h18a1 1 0 0 0 0-2Z" />
+    </svg>
+  );
+}
+
+function RetirementPlanIcon({ className = "h-[1em] w-[1em]" }: { className?: string }) {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24" className={className} fill="currentColor">
+      <path d="M21 6.25C21 4.455 19.545 3 17.75 3H6.25C4.455 3 3 4.455 3 6.25v11.5C3 19.545 4.455 21 6.25 21h5.772a6.45 6.45 0 0 1-.709-1.5H6.25A1.75 1.75 0 0 1 4.5 17.75V8.5h15v2.814c.534.172 1.037.411 1.5.708V6.25ZM6.25 4.5h11.5a1.75 1.75 0 0 1 1.75 1.75V7h-15v-.75A1.75 1.75 0 0 1 6.25 4.5Z" />
+      <path d="M23 17.5a5.5 5.5 0 1 0-11 0 5.5 5.5 0 0 0 11 0Zm-5.5 0h2a.5.5 0 0 1 0 1H17a.5.5 0 0 1-.5-.491V15a.5.5 0 0 1 1 0v2.5Z" />
+    </svg>
+  );
+}
+
+function UnsureIcon({ className = "h-[1em] w-[1em]" }: { className?: string }) {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24" className={className} fill="none">
+      <circle cx="12" cy="12" r="10" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" />
+      <path d="M12 13c1.657 0 3-1.343 3-3s-1.343-3-3-3-3 1.343-3 3" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" />
+      <line x1="12" y1="13" x2="12" y2="14" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" />
+      <path d="M12 17v.01" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" />
+    </svg>
+  );
+}
+
+function PhoneStatusIcon({ status }: { status: PhoneValidationStatus }) {
+  if (status === "validating") {
+    return (
+      <svg
+        aria-hidden="true"
+        viewBox="0 0 24 24"
+        className="h-[18px] w-[18px] animate-spin text-[#94a3b8]"
+        fill="none"
+      >
+        <circle cx="12" cy="12" r="8" stroke="currentColor" strokeWidth="3" opacity="0.24" />
+        <path d="M20 12a8 8 0 0 0-8-8" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+      </svg>
+    );
+  }
+
+  if (status === "valid") {
+    return (
+      <svg
+        aria-hidden="true"
+        viewBox="0 0 24 24"
+        className="h-[20px] w-[20px] text-[#16a34a]"
+        fill="none"
+      >
+        <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2" />
+        <path d="m7.8 12.2 2.6 2.6 5.8-6" stroke="currentColor" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    );
+  }
+
+  if (status === "invalid") {
+    return (
+      <svg
+        aria-hidden="true"
+        viewBox="0 0 24 24"
+        className="h-[20px] w-[20px] text-[#dc2626]"
+        fill="none"
+      >
+        <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2" />
+        <path d="m8.5 8.5 7 7M15.5 8.5l-7 7" stroke="currentColor" strokeWidth="2.3" strokeLinecap="round" />
+      </svg>
+    );
+  }
+
+  return null;
+}
+
+function parseTimeToMinutes(value: string) {
+  if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(value)) return null;
+
+  const [hours, minutes] = value.split(":").map(Number);
+  return hours * 60 + minutes;
+}
+
+function getNewYorkMinutes() {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(new Date());
+  const hour = Number(parts.find((part) => part.type === "hour")?.value);
+  const minute = Number(parts.find((part) => part.type === "minute")?.value);
+
+  if (!Number.isFinite(hour) || !Number.isFinite(minute)) return null;
+
+  return hour * 60 + minute;
+}
+
+function isWithinTimeWindow(current: number, start: number, end: number) {
+  if (start === end) return true;
+  if (start < end) return current >= start && current < end;
+  return current >= start || current < end;
+}
+
+function isPayPerCallWindowOpen(config: RuntimeConfig) {
+  if (config.payPerCallStatus !== "ON") return false;
+
+  const start = parseTimeToMinutes(config.payPerCallStartTime);
+  const end = parseTimeToMinutes(config.payPerCallEndTime);
+  const current = getNewYorkMinutes();
+
+  if (start == null || end == null || current == null) return false;
+
+  return isWithinTimeWindow(current, start, end);
+}
+
+function lowerAnalyticsValue(value?: string | null) {
+  const normalized = String(value || "").trim().toLowerCase();
+  return normalized || undefined;
+}
+
+function getAnalyticsState(value?: string | null) {
+  const state = String(value || "").trim();
+  if (/^[A-Za-z]{2}$/.test(state)) return state.toLowerCase();
+  return stateAbbreviations[state] || lowerAnalyticsValue(state);
+}
+
+type IulV6ClientProps = {
+  initialPrelandName?: string | null;
+};
+
+export default function IulV6Client({ initialPrelandName }: IulV6ClientProps) {
+  const [activePrelandName, setActivePrelandName] = useState<string | null>(() =>
+    getPrelandComponent(initialPrelandName) ? initialPrelandName?.trim() || null : null,
+  );
+  const [currentStep, setCurrentStep] = useState<FunnelStep>(() =>
+    hasAgeRejectedCookie() ? "rejected" : "age",
+  );
+  const [, setSlideDirection] = useState<"forward" | "backward">("forward");
   const [panelKey, setPanelKey] = useState(0);
   const [isTransitioningOut, setIsTransitioningOut] = useState(false);
   const [answers, setAnswers] = useState<FunnelAnswers>(emptyAnswers);
   const [defaultLocationText, setDefaultLocationText] = useState(emptyAnswers.locationText);
   const [isLookingUpZip, setIsLookingUpZip] = useState(false);
-  const [hasHydratedSavedData, setHasHydratedSavedData] = useState(false);
   const [hasLoadedGeo, setHasLoadedGeo] = useState(false);
   const [phoneError, setPhoneError] = useState("");
   const [emailError, setEmailError] = useState("");
   const [zipError, setZipError] = useState("");
   const [submitError, setSubmitError] = useState("");
   const [isSubmittingLead, setIsSubmittingLead] = useState(false);
-  const [leadEventNonce, setLeadEventNonce] = useState<string | null>(null);
+  const [isPhoneValidating, setIsPhoneValidating] = useState(false);
+  const [hasBlurredPhone, setHasBlurredPhone] = useState(false);
+  const [leadToken, setLeadToken] = useState("");
+  const [isPayPerCallPopupOpen, setIsPayPerCallPopupOpen] = useState(false);
+  const [submittedLeadId, setSubmittedLeadId] = useState("");
+  const [submittedContinueUrl, setSubmittedContinueUrl] = useState("");
+  const [submittedFirstName, setSubmittedFirstName] = useState("");
+  const [submittedInsuranceGoal, setSubmittedInsuranceGoal] = useState("");
+  const [runtimeConfig, setRuntimeConfig] = useState<RuntimeConfig>(defaultRuntimeConfig);
   const transitionTimeoutRef = useRef<number | null>(null);
-  const trackedLeadNonceRef = useRef<string | null>(null);
+  const phoneValidationTimeoutRef = useRef<number | null>(null);
+  const trackedStepsRef = useRef<Set<string>>(new Set());
+  const trackedAutoZipRef = useRef(false);
+  const submittedLeadRef = useRef(false);
+  const leadUrlRef = useRef("");
+  const runtimeConfigRef = useRef<RuntimeConfig>(defaultRuntimeConfig);
 
+  const ActivePreland = getPrelandComponent(activePrelandName);
+  const isPrelandActive = Boolean(ActivePreland);
   const isSuccessPage = currentStep === "success";
-  const isQuestionnaire = currentStep !== "intro";
-  const isHomePage = pathname === "/";
-  const pageValue = isHomePage ? "home" : pathname;
-  const storageKeyValue = useMemo(() => `best-life-funnel-v1:${pageValue}`, [pageValue]);
+  const isRejectedPage = currentStep === "rejected";
+  const isQuestionnaire = currentStep !== "intro" && !isRejectedPage;
   const successHash = "#gracias";
   const recommendedAgeOption = answers.ageGroup ? "" : "35 a 44";
   const recommendedGoalOption = answers.insuranceGoal ? "" : "Ahorrar e invertir";
@@ -825,6 +882,10 @@ export default function IulV2ExportPage() {
     ? (["age", "goal", "state", "name", "phone"] as FunnelStep[])
     : (["age", "goal", "name", "phone"] as FunnelStep[]);
   const currentQuestionIndex = visibleQuestionSteps.indexOf(currentStep);
+  const progressLabel =
+    currentQuestionIndex >= 0
+      ? `${currentQuestionIndex + 1} de ${visibleQuestionSteps.length}`
+      : "";
   const progress =
     currentQuestionIndex >= 0
       ? ((currentQuestionIndex + 1) / visibleQuestionSteps.length) * 100
@@ -833,50 +894,190 @@ export default function IulV2ExportPage() {
     ? "animate-[survey-question-out_0.18s_cubic-bezier(0.4,0,1,1)_forwards]"
     : "animate-[survey-question-in_0.42s_cubic-bezier(0.22,0.61,0.36,1)]";
 
-  const normalizedPhone = useMemo(() => answers.phoneNumber.replace(/\D/g, ""), [answers.phoneNumber]);
+  const normalizedPhone = normalizeUsPhoneInput(answers.phoneNumber);
+  const shouldShowPhoneValidation = normalizedPhone.length >= 10 || (hasBlurredPhone && normalizedPhone.length > 0);
+  const livePhoneValidationMessage = shouldShowPhoneValidation
+    ? getPhoneValidationMessage(normalizedPhone)
+    : "";
+  const phoneValidationStatus: PhoneValidationStatus = !shouldShowPhoneValidation
+    ? "idle"
+    : isPhoneValidating
+      ? "validating"
+      : livePhoneValidationMessage
+        ? "invalid"
+        : "valid";
+  const phoneBorderClass =
+    phoneValidationStatus === "invalid" || phoneError
+      ? "border-[#e11d48] focus:border-[#e11d48]"
+      : phoneValidationStatus === "valid"
+        ? "border-[#16a34a] focus:border-[#16a34a]"
+        : "border-[#9c9c9c] focus:border-[var(--brand)]";
+  const visiblePhoneError =
+    phoneValidationStatus === "validating"
+      ? ""
+      : phoneError || (phoneValidationStatus === "invalid" ? livePhoneValidationMessage : "");
+
+  function getAnalyticsLeadPayload() {
+    const location = answers.locationText || defaultLocationText || "";
+    const city = location.split(",")[0]?.trim() || "";
+    const state = answers.state || answers.detectedState;
+
+    return {
+      funnel_id: "iul-v6",
+      step: currentStep,
+      country: "us",
+      state: getAnalyticsState(state),
+      zip_code: answers.zipCode || undefined,
+      city: lowerAnalyticsValue(city),
+      location: lowerAnalyticsValue(location),
+      age_group: lowerAnalyticsValue(answers.ageGroup),
+      insurance_goal: lowerAnalyticsValue(answers.insuranceGoal),
+      first_name: lowerAnalyticsValue(answers.firstName),
+      last_name: lowerAnalyticsValue(answers.lastName),
+      phone_number: normalizedPhone || undefined,
+      email: lowerAnalyticsValue(answers.email),
+      ...getUtmParams(),
+    };
+  }
 
   useEffect(() => {
-    try {
-      const raw = window.localStorage.getItem(storageKeyValue);
-      if (!raw) {
-        setHasHydratedSavedData(true);
-        return;
-      }
+    leadUrlRef.current = window.location.href;
+  }, []);
 
-      const parsed = JSON.parse(raw) as { answers?: Partial<FunnelAnswers>; currentStep?: FunnelStep };
-      const restoredStep = parsed.currentStep === "email" ? "phone" : parsed.currentStep;
-
-      if (parsed.answers) {
-        setAnswers((prev) => ({ ...prev, ...parsed.answers }));
-        if (parsed.answers.locationText) {
-          setDefaultLocationText(parsed.answers.locationText);
-        }
-      }
-
-      if (
-        restoredStep &&
-        restoredStep !== "success" &&
-        stepOrder.includes(restoredStep)
-      ) {
-        setCurrentStep(restoredStep);
-      }
-    } catch {
-      // Ignore invalid localStorage payloads.
-    } finally {
-      setHasHydratedSavedData(true);
+  useEffect(() => {
+    if (hasAgeRejectedCookie()) {
+      setCurrentStep("rejected");
     }
-  }, [storageKeyValue]);
+  }, []);
 
   useEffect(() => {
-    if (!hasHydratedSavedData) return;
-    const persistedStep = currentStep === "success" ? "intro" : currentStep;
-    window.localStorage.setItem(
-      storageKeyValue,
-      JSON.stringify({ currentStep: persistedStep, answers }),
-    );
-  }, [answers, currentStep, hasHydratedSavedData, storageKeyValue]);
+    if (process.env.NODE_ENV !== "development") return;
+
+    const searchParams = new URLSearchParams(window.location.search);
+    if (searchParams.get("preview_popup1") === "1") {
+      setSubmittedFirstName("Antony");
+      setSubmittedInsuranceGoal("Ahorrar e invertir");
+      setIsPayPerCallPopupOpen(true);
+    }
+  }, []);
 
   useEffect(() => {
+    let isMounted = true;
+
+    async function loadRuntimeConfig() {
+      try {
+        const response = await fetch("/api/runtime-config", { cache: "no-store" });
+        if (!response.ok) return;
+
+        const config = (await response.json()) as Partial<RuntimeConfig>;
+        const nextConfig = {
+          ...defaultRuntimeConfig,
+          ...Object.fromEntries(
+            Object.entries(config).filter(([, value]) => typeof value === "string" && value.trim()),
+          ),
+        } as RuntimeConfig;
+
+        if (!isMounted) return;
+        runtimeConfigRef.current = nextConfig;
+        setRuntimeConfig(nextConfig);
+      } catch {
+        // Keep deploy-time fallbacks if runtime config is temporarily unavailable.
+      }
+    }
+
+    void loadRuntimeConfig();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (transitionTimeoutRef.current !== null) {
+        window.clearTimeout(transitionTimeoutRef.current);
+      }
+      if (phoneValidationTimeoutRef.current !== null) {
+        window.clearTimeout(phoneValidationTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (phoneValidationTimeoutRef.current !== null) {
+      window.clearTimeout(phoneValidationTimeoutRef.current);
+      phoneValidationTimeoutRef.current = null;
+    }
+
+    if (!shouldShowPhoneValidation) {
+      setIsPhoneValidating(false);
+      setPhoneError("");
+      return;
+    }
+
+    setIsPhoneValidating(true);
+    phoneValidationTimeoutRef.current = window.setTimeout(() => {
+      phoneValidationTimeoutRef.current = null;
+      setIsPhoneValidating(false);
+      setPhoneError(getPhoneValidationMessage(normalizedPhone));
+    }, 420);
+
+    return () => {
+      if (phoneValidationTimeoutRef.current !== null) {
+        window.clearTimeout(phoneValidationTimeoutRef.current);
+        phoneValidationTimeoutRef.current = null;
+      }
+    };
+  }, [normalizedPhone, shouldShowPhoneValidation]);
+
+  useEffect(() => {
+    if (isPrelandActive || isRejectedPage || currentQuestionIndex < 0) return;
+
+    const trackingKey = `${currentQuestionIndex}:${currentStep}`;
+    if (trackedStepsRef.current.has(trackingKey)) return;
+
+    trackedStepsRef.current.add(trackingKey);
+    trackFunnelEvent(currentQuestionIndex === 0 ? "PageView" : "ViewContent", {
+      ...getAnalyticsLeadPayload(),
+      event_id: createEventId(currentQuestionIndex === 0 ? "pageview" : "viewcontent"),
+      step_number: currentQuestionIndex + 1,
+    });
+  }, [
+    currentQuestionIndex,
+    currentStep,
+    isRejectedPage,
+    answers.state,
+    answers.detectedState,
+    answers.zipCode,
+    answers.ageGroup,
+    answers.insuranceGoal,
+    answers.firstName,
+    answers.lastName,
+    answers.email,
+    normalizedPhone,
+    isPrelandActive,
+  ]);
+
+  useEffect(() => {
+    if (isPrelandActive) return;
+    if (document.getElementById(trustedFormScriptId)) return;
+
+    const trustedFormScript = document.createElement("script");
+    trustedFormScript.id = trustedFormScriptId;
+    trustedFormScript.type = "text/javascript";
+    trustedFormScript.async = true;
+    trustedFormScript.src = `${window.location.protocol}//api.trustedform.com/trustedform.js?field=${encodeURIComponent(
+      trustedFormFieldName,
+    )}&use_tagged_consent=true&l=${Date.now()}${Math.random()}`;
+
+    const firstScript = document.getElementsByTagName("script")[0];
+    firstScript?.parentNode?.insertBefore(trustedFormScript, firstScript);
+  }, [isPrelandActive]);
+
+  useEffect(() => {
+    if (isPrelandActive) return;
+    if (isRejectedPage) return;
+
     let isCancelled = false;
 
     async function hydrateAreaFromIp() {
@@ -892,23 +1093,27 @@ export default function IulV2ExportPage() {
 
         if (isCancelled || !data.location) return;
 
-        setDefaultLocationText((prev) => prev || data.location || emptyAnswers.locationText);
+        const detectedState = data.state && stateOptions.includes(data.state) ? data.state : "";
+        const detectedZip = data.zipCode && /^\d{5}$/.test(data.zipCode) ? data.zipCode : "";
+        const backup = detectedState ? buildLocationBackup(detectedState) : null;
+        const resolvedZipCode = detectedZip || backup?.zipCode || "";
+        const resolvedLocationText = data.location || backup?.locationText || emptyAnswers.locationText;
+
+        if (isBlockedState(detectedState)) {
+          rejectByNewYork();
+          return;
+        }
+
+        setDefaultLocationText((prev) => prev || resolvedLocationText);
         setAnswers((prev) => ({
           ...prev,
-          zipCode:
-            isHomePage
-              ? prev.zipCode
-              : prev.zipCode && prev.zipCode.length === 5
-                ? prev.zipCode
-                : data.zipCode && /^\d{5}$/.test(data.zipCode)
-                  ? data.zipCode
-                  : prev.zipCode,
-          locationText: prev.locationText || data.location || emptyAnswers.locationText,
-          state: prev.state || data.state || prev.detectedState,
-          detectedState: prev.detectedState || data.state || "",
+          zipCode: prev.zipCode || resolvedZipCode,
+          locationText: prev.locationText || resolvedLocationText,
+          state: prev.state || detectedState || backup?.state || "",
+          detectedState: prev.detectedState || detectedState,
         }));
       } catch {
-        // Local fallback stays in place if geo isn't available.
+        // The ZIP step is the fallback if Vercel geolocation is unavailable.
       } finally {
         if (!isCancelled) setHasLoadedGeo(true);
       }
@@ -919,14 +1124,12 @@ export default function IulV2ExportPage() {
     return () => {
       isCancelled = true;
     };
-  }, [isHomePage]);
+  }, [isPrelandActive, isRejectedPage]);
 
   useEffect(() => {
+    if (isPrelandActive) return;
+    if (isRejectedPage) return;
     if (!hasLoadedGeo) return;
-    if (isHomePage) {
-      setIsLookingUpZip(false);
-      return;
-    }
 
     const zipCode = answers.zipCode;
 
@@ -937,7 +1140,11 @@ export default function IulV2ExportPage() {
     }
 
     if (zipCode.length < 5) {
-      setAnswers((prev) => ({ ...prev, locationText: defaultLocationText }));
+      setAnswers((prev) => ({
+        ...prev,
+        locationText: defaultLocationText,
+        state: prev.detectedState || "",
+      }));
       setIsLookingUpZip(false);
       return;
     }
@@ -964,6 +1171,11 @@ export default function IulV2ExportPage() {
         const data = (await response.json()) as ZipLookupResponse;
 
         if (isResolvedUsZip(data, zipCode)) {
+          if (isBlockedState(data.state)) {
+            rejectByNewYork();
+            return;
+          }
+
           setAnswers((prev) => ({
             ...prev,
             locationText: data.location || defaultLocationText,
@@ -996,78 +1208,77 @@ export default function IulV2ExportPage() {
       controller.abort();
       window.clearTimeout(timeoutId);
     };
-  }, [answers.zipCode, defaultLocationText, hasLoadedGeo, isHomePage]);
-
-  useEffect(() => {
-    return () => {
-      if (transitionTimeoutRef.current !== null) {
-        window.clearTimeout(transitionTimeoutRef.current);
-      }
-    };
-  }, []);
+  }, [answers.zipCode, defaultLocationText, hasLoadedGeo, isPrelandActive, isRejectedPage]);
 
   useEffect(() => {
     const guardSuccessHash = () => {
+      if (hasAgeRejectedCookie()) {
+        setCurrentStep("rejected");
+        window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}${ageRejectedHash}`);
+        return;
+      }
+
       if (window.location.hash !== successHash) return;
-      if (currentStep === "success" || leadEventNonce) return;
+      if (currentStep === "success") return;
 
       window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
-      setCurrentStep("intro");
+      setCurrentStep("age");
       setPanelKey((prev) => prev + 1);
     };
 
     guardSuccessHash();
     window.addEventListener("hashchange", guardSuccessHash);
     return () => window.removeEventListener("hashchange", guardSuccessHash);
-  }, [currentStep, leadEventNonce, successHash]);
+  }, [currentStep, successHash]);
 
   useEffect(() => {
-    if (!leadEventNonce || currentStep !== "success" || window.location.hash !== successHash) return;
-    if (trackedLeadNonceRef.current === leadEventNonce) return;
+    if (!isRejectedPage) return;
 
-    const trackingWindow = window as Window &
-      typeof globalThis & {
-        fbq?: (...args: unknown[]) => void;
-        ttq?: { track?: (...args: unknown[]) => void };
-        __metaPixelId?: string;
-      };
+    const rejectedUrl = `${window.location.pathname}${window.location.search}${ageRejectedHash}`;
+    if (window.location.hash !== ageRejectedHash) {
+      window.history.replaceState({ bfAgeRejected: true }, "", rejectedUrl);
+    }
 
-    trackedLeadNonceRef.current = leadEventNonce;
-    void (async () => {
-      try {
-        const metaPixelId = trackingWindow.__metaPixelId || "980723860687387";
-        const deviceId = getOrCreateDeviceId();
-        const { userData, customData } = await buildMetaLeadTrackingData({
-          answers,
-          normalizedPhone,
-          deviceId,
-        });
-
-        if (Object.keys(userData).length > 0) {
-          trackingWindow.fbq?.("init", metaPixelId, userData);
-        }
-
-        trackingWindow.fbq?.("track", "Lead", customData);
-      } catch {
-        trackingWindow.fbq?.("track", "Lead");
-      } finally {
-        trackingWindow.ttq?.track?.("CompleteRegistration");
+    const keepRejectedView = () => {
+      if (!hasAgeRejectedCookie()) return;
+      setCurrentStep("rejected");
+      if (window.location.hash !== ageRejectedHash) {
+        window.history.replaceState({ bfAgeRejected: true }, "", rejectedUrl);
       }
-    })();
-  }, [
-    answers,
-    currentStep,
-    leadEventNonce,
-    normalizedPhone,
-    successHash,
-  ]);
+    };
+
+    window.addEventListener("popstate", keepRejectedView);
+    window.addEventListener("hashchange", keepRejectedView);
+    return () => {
+      window.removeEventListener("popstate", keepRejectedView);
+      window.removeEventListener("hashchange", keepRejectedView);
+    };
+  }, [isRejectedPage]);
 
   useEffect(() => {
+    if (isPrelandActive) return;
+    if (isRejectedPage) return;
     if (currentStep !== "state" || shouldAskZipCode) return;
+    if (!trackedAutoZipRef.current) {
+      trackedAutoZipRef.current = true;
+      trackVercelIulV6VirtualPage("v6_step3_zip", {
+        step: "state",
+        step_number: 3,
+        zip_detected: true,
+        country: "us",
+        state: getAnalyticsState(resolvedUsState || detectedUsState),
+        zip_code: answers.zipCode || undefined,
+      });
+    }
     transitionTo("name", "forward");
-  }, [currentStep, shouldAskZipCode]);
+  }, [answers.zipCode, currentStep, detectedUsState, isPrelandActive, isRejectedPage, resolvedUsState, shouldAskZipCode]);
 
   function transitionTo(nextStep: FunnelStep, direction: "forward" | "backward") {
+    if (isRejectedPage || hasAgeRejectedCookie()) {
+      setCurrentStep("rejected");
+      return;
+    }
+
     setSlideDirection(direction);
     setIsTransitioningOut(true);
     if (transitionTimeoutRef.current !== null) {
@@ -1083,6 +1294,15 @@ export default function IulV2ExportPage() {
   }
 
   function goBack() {
+    if (isRejectedPage || hasAgeRejectedCookie()) {
+      setCurrentStep("rejected");
+      return;
+    }
+
+    if (currentStep === "age") {
+      return;
+    }
+
     if (currentStep === "name" && !shouldAskZipCode) {
       transitionTo("goal", "backward");
       return;
@@ -1094,7 +1314,73 @@ export default function IulV2ExportPage() {
   }
 
   function startQuestionnaire() {
+    if (hasAgeRejectedCookie()) {
+      setCurrentStep("rejected");
+      return;
+    }
+
     transitionTo("age", "forward");
+  }
+
+  function continueFromPreland() {
+    setActivePrelandName(null);
+
+    if (typeof window === "undefined") return;
+
+    const nextUrl = new URL(window.location.href);
+    nextUrl.searchParams.delete("preland");
+    window.history.replaceState(null, "", `${nextUrl.pathname}${nextUrl.search}${nextUrl.hash}`);
+  }
+
+  function rejectByAge() {
+    setAgeRejectedCookie();
+
+    if (transitionTimeoutRef.current !== null) {
+      window.clearTimeout(transitionTimeoutRef.current);
+      transitionTimeoutRef.current = null;
+    }
+
+    setAnswers((prev) => ({ ...prev, ageGroup: "65+" }));
+    setSubmitError("");
+    setPhoneError("");
+    setEmailError("");
+    setZipError("");
+    setIsSubmittingLead(false);
+    setIsLookingUpZip(false);
+    setIsTransitioningOut(false);
+    setCurrentStep("rejected");
+    setPanelKey((prev) => prev + 1);
+    window.history.replaceState(
+      { bfAgeRejected: true },
+      "",
+      `${window.location.pathname}${window.location.search}${ageRejectedHash}`,
+    );
+    window.location.replace("/iul-v6/rechazo");
+  }
+
+  function rejectByNewYork() {
+    setAgeRejectedCookie();
+
+    if (transitionTimeoutRef.current !== null) {
+      window.clearTimeout(transitionTimeoutRef.current);
+      transitionTimeoutRef.current = null;
+    }
+
+    setSubmitError("");
+    setPhoneError("");
+    setEmailError("");
+    setZipError("");
+    setIsSubmittingLead(false);
+    setIsLookingUpZip(false);
+    setIsTransitioningOut(false);
+    setCurrentStep("rejected");
+    setPanelKey((prev) => prev + 1);
+    window.history.replaceState(
+      { bfAgeRejected: true },
+      "",
+      `${window.location.pathname}${window.location.search}${ageRejectedHash}`,
+    );
+    window.location.replace("/iul-v6/rechazo");
   }
 
   function handleDirectChoice<K extends keyof FunnelAnswers>(
@@ -1102,6 +1388,28 @@ export default function IulV2ExportPage() {
     value: FunnelAnswers[K],
     nextStep: FunnelStep
   ) {
+    if (isRejectedPage || hasAgeRejectedCookie()) {
+      setCurrentStep("rejected");
+      return;
+    }
+
+    if (field === "ageGroup" && value === "65+") {
+      rejectByAge();
+      return;
+    }
+
+    if (field === "insuranceGoal" && nextStep === "name" && !trackedAutoZipRef.current) {
+      trackedAutoZipRef.current = true;
+      trackVercelIulV6VirtualPage("v6_step3_zip", {
+        step: "state",
+        step_number: 3,
+        zip_detected: true,
+        country: "us",
+        state: getAnalyticsState(resolvedUsState || detectedUsState),
+        zip_code: answers.zipCode || undefined,
+      });
+    }
+
     setAnswers((prev) => ({ ...prev, [field]: value }));
     window.setTimeout(() => {
       transitionTo(nextStep, "forward");
@@ -1109,6 +1417,11 @@ export default function IulV2ExportPage() {
   }
 
   async function handleZipCodeContinue() {
+    if (isRejectedPage || hasAgeRejectedCookie()) {
+      setCurrentStep("rejected");
+      return;
+    }
+
     const zipCode = normalizeZipCode(answers.zipCode);
     const zipValidationMessage = getZipValidationMessage(zipCode);
 
@@ -1133,6 +1446,11 @@ export default function IulV2ExportPage() {
 
       if (!isResolvedUsZip(data, zipCode)) {
         throw new Error("Ingresa un ZIP code real de EE.UU.");
+      }
+
+      if (isBlockedState(data.state)) {
+        rejectByNewYork();
+        return;
       }
 
       setAnswers((prev) => ({
@@ -1161,7 +1479,49 @@ export default function IulV2ExportPage() {
     }
   }
 
+  async function prepareLeadToken() {
+    if (leadToken) return leadToken;
+
+    const tokenResponse = await fetch("/api/lead-token", { cache: "no-store" });
+
+    if (!tokenResponse.ok) {
+      throw new Error("No pudimos preparar el envio seguro. Intenta nuevamente.");
+    }
+
+    const tokenBody = (await tokenResponse.json().catch(() => null)) as { token?: string } | null;
+    const nextLeadToken = tokenBody?.token;
+
+    if (!nextLeadToken) {
+      throw new Error("No pudimos preparar el envio seguro. Intenta nuevamente.");
+    }
+
+    setLeadToken(nextLeadToken);
+    return nextLeadToken;
+  }
+
+  async function handleNameContinue() {
+    if (!answers.firstName.trim() || !answers.lastName.trim()) return;
+
+    setSubmitError("");
+    transitionTo("phone", "forward");
+
+    try {
+      await prepareLeadToken();
+    } catch (error) {
+      const message =
+        error instanceof Error && error.message
+          ? error.message
+          : "No pudimos preparar el envio seguro. Intenta nuevamente.";
+      setSubmitError(message);
+    }
+  }
+
   async function submitLead() {
+    if (isRejectedPage || hasAgeRejectedCookie()) {
+      setCurrentStep("rejected");
+      return;
+    }
+
     if (!answers.firstName.trim() || !answers.lastName.trim()) return;
 
     const phoneValidationMessage = getPhoneValidationMessage(normalizedPhone);
@@ -1178,14 +1538,31 @@ export default function IulV2ExportPage() {
     setPhoneError("");
     setEmailError("");
     setSubmitError("");
+
+    if (submittedLeadRef.current || submittedLeadId) {
+      if (isPayPerCallWindowOpen(runtimeConfigRef.current)) {
+        setIsPayPerCallPopupOpen(true);
+        return;
+      }
+
+      const fallbackParams = new URLSearchParams(window.location.search);
+      fallbackParams.set("funnel_id", "iul-v6");
+      if (submittedLeadId) {
+        fallbackParams.set("lead_id", submittedLeadId);
+      }
+      const fallbackSearch = fallbackParams.toString() ? `?${fallbackParams.toString()}` : "";
+      window.location.assign(`/thanks/lead${fallbackSearch}`);
+      return;
+    }
+
     setIsSubmittingLead(true);
 
     try {
       let resolvedZipCode = answers.zipCode;
-      let resolvedLocationText = answers.locationText;
+      let resolvedLocationText = answers.locationText || defaultLocationText;
       let resolvedState = answers.state || answers.detectedState;
 
-      if (!isHomePage && !resolvedZipCode) {
+      if (!resolvedState || !resolvedZipCode || !resolvedLocationText) {
         try {
           const locationResponse = await fetch("/api/location", { cache: "no-store" });
 
@@ -1196,75 +1573,177 @@ export default function IulV2ExportPage() {
               state?: string | null;
             };
 
-            if (locationData.zipCode && /^\d{5}$/.test(locationData.zipCode)) {
+            if (!resolvedState && locationData.state && stateOptions.includes(locationData.state)) {
+              resolvedState = locationData.state;
+            }
+
+            if (!resolvedZipCode && locationData.zipCode && /^\d{5}$/.test(locationData.zipCode)) {
               resolvedZipCode = locationData.zipCode;
             }
 
             if (!resolvedLocationText && locationData.location) {
               resolvedLocationText = locationData.location;
             }
-
-            if (!resolvedState && locationData.state) {
-              resolvedState = locationData.state;
-            }
-
-            setAnswers((prev) => ({
-              ...prev,
-              zipCode: prev.zipCode || resolvedZipCode,
-              locationText: prev.locationText || resolvedLocationText,
-              state: prev.state || resolvedState,
-              detectedState: prev.detectedState || locationData.state || "",
-            }));
           }
         } catch {
-          // Keep the current answers if the geo refresh is unavailable.
+          // Continue to deterministic backups below.
         }
       }
 
+      if (resolvedState && (!resolvedZipCode || !resolvedLocationText)) {
+        const backup = buildLocationBackup(resolvedState, normalizedPhone);
+        resolvedZipCode = resolvedZipCode || backup.zipCode;
+        resolvedLocationText = resolvedLocationText || backup.locationText;
+        resolvedState = resolvedState || backup.state;
+      }
+
+      if (resolvedZipCode && (!resolvedState || !resolvedLocationText)) {
+        try {
+          const zipResponse = await fetch(`/api/zip/${resolvedZipCode}`, { cache: "no-store" });
+          if (zipResponse.ok) {
+            const zipData = (await zipResponse.json()) as ZipLookupResponse;
+            if (isResolvedUsZip(zipData, resolvedZipCode)) {
+              resolvedState = resolvedState || zipData.state || "";
+              resolvedLocationText = resolvedLocationText || zipData.location || "";
+            }
+          }
+        } catch {
+          // Keep any already resolved backup values.
+        }
+      }
+
+      if (!resolvedState || !resolvedZipCode || !resolvedLocationText) {
+        setSubmitError("Necesitamos confirmar tu estado para completar la solicitud.");
+        transitionTo("state", "backward");
+        return;
+      }
+
+      const completedAnswers = {
+        ...answers,
+        zipCode: resolvedZipCode,
+        locationText: resolvedLocationText,
+        state: resolvedState,
+        detectedState: answers.detectedState || resolvedState,
+      };
+      const hasCompleteLeadData = [
+        completedAnswers.ageGroup,
+        completedAnswers.insuranceGoal,
+        completedAnswers.state,
+        completedAnswers.firstName.trim(),
+        completedAnswers.lastName.trim(),
+        normalizedPhone,
+        completedAnswers.email.trim(),
+        completedAnswers.locationText,
+        completedAnswers.zipCode,
+      ].every(Boolean);
+
+      if (!hasCompleteLeadData) {
+        setSubmitError("Necesitamos completar tu ubicaciÃ³n para enviar la solicitud.");
+        transitionTo("state", "backward");
+        return;
+      }
+
+      setAnswers(completedAnswers);
+
+      const urlParams = new URLSearchParams(window.location.search);
+      const sub1 = urlParams.get("sub1")?.trim() || "";
+      const sub2 = urlParams.get("sub2")?.trim() || "";
+      const adaccountName = urlParams.get("adaccount_name")?.trim() || "";
       const cleanedAnswers = Object.fromEntries(
         Object.entries({
-          ageGroup: answers.ageGroup,
-          insuranceGoal: answers.insuranceGoal,
-          state: resolvedState,
-          firstName: answers.firstName.trim(),
-          lastName: answers.lastName.trim(),
+          ageGroup: completedAnswers.ageGroup,
+          insuranceGoal: completedAnswers.insuranceGoal,
+          state: completedAnswers.state,
+          firstName: completedAnswers.firstName.trim(),
+          lastName: completedAnswers.lastName.trim(),
           phoneNumber: normalizedPhone,
-          email: answers.email.trim(),
-          locationText: resolvedLocationText,
-          zipCode: isHomePage ? undefined : resolvedZipCode,
+          email: completedAnswers.email.trim(),
+          locationText: completedAnswers.locationText,
+          zipCode: completedAnswers.zipCode,
+          sub1,
+          sub2,
         }).filter(([, value]) => value !== "" && value != null)
       );
+      const preparedLeadToken = await prepareLeadToken();
+      const activeRuntimeConfig = runtimeConfigRef.current;
+      const shouldUsePayPerCallThankYou = isPayPerCallWindowOpen(activeRuntimeConfig);
 
-      const response = await fetch("/api/lead", {
+      const response = await fetch("/api/lead-iul-v6", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "x-lead-token": preparedLeadToken,
+        },
         body: JSON.stringify({
-          page: pageValue,
+          page: "/iul-v6",
           answers: cleanedAnswers,
           meta: {
             deviceId: getOrCreateDeviceId(),
+            trustedFormCertUrl: getTrustedFormCertUrl(),
+            salePath: shouldUsePayPerCallThankYou ? "call" : "lead",
+            adaccountName,
+            leadUrl: leadUrlRef.current || window.location.href,
           },
         }),
       });
 
       if (!response.ok) {
         const errorBody = (await response.json().catch(() => null)) as { error?: string } | null;
-        throw new Error(errorBody?.error || "Lead submission failed");
+        throw new Error(errorBody?.error || "No pudimos enviar tu solicitud ahora mismo.");
       }
 
-      const leadNonce = `${Date.now()}`;
+      const responseBody = (await response.json().catch(() => null)) as {
+        leadId?: string;
+      } | null;
+      const leadId = responseBody?.leadId;
+      submittedLeadRef.current = true;
+      const leadEventId = createEventId("lead");
+      const nextParams = new URLSearchParams(window.location.search);
+      nextParams.set("funnel_id", "iul-v6");
+      if (leadId) {
+        nextParams.set("lead_id", leadId);
+      }
+      nextParams.set("first_name", completedAnswers.firstName.trim());
+      nextParams.set("insurance_goal", completedAnswers.insuranceGoal);
+      nextParams.set("application_number", buildApplicationNumber(leadId));
+      if (activeRuntimeConfig.payPerCallPhoneNumber) {
+        nextParams.set("ppc_phone", activeRuntimeConfig.payPerCallPhoneNumber);
+      }
+      if (activeRuntimeConfig.ringbaCampaignId) {
+        nextParams.set("ringba_campaign_id", activeRuntimeConfig.ringbaCampaignId);
+      }
+
+      const nextSearch = nextParams.toString() ? `?${nextParams.toString()}` : "";
+
+      trackFunnelEvent("Lead", {
+        ...getAnalyticsLeadPayload(),
+        event_id: leadEventId,
+        lead_id: leadId,
+        external_id: leadId,
+      });
+
       window.history.replaceState(
         null,
         "",
-        `${window.location.pathname}${window.location.search}${successHash}`,
+        `${window.location.pathname}${nextSearch}${successHash}`,
       );
-      setLeadEventNonce(leadNonce);
-      transitionTo("success", "forward");
+      setLeadToken("");
+
+      if (shouldUsePayPerCallThankYou) {
+        setSubmittedLeadId(leadId || "");
+        setSubmittedFirstName(completedAnswers.firstName.trim());
+        setSubmittedInsuranceGoal(completedAnswers.insuranceGoal);
+        setSubmittedContinueUrl(`/thanks/call2${nextSearch}`);
+        setIsPayPerCallPopupOpen(true);
+        return;
+      }
+
+      window.location.assign(`/thanks/lead${nextSearch}`);
     } catch (error) {
       const message =
         error instanceof Error && error.message
           ? error.message
-          : "No pudimos enviar tu solicitud ahora mismo. Tus respuestas quedaron guardadas.";
+          : "No pudimos enviar tu solicitud ahora mismo. Intenta nuevamente.";
       setSubmitError(message);
     } finally {
       setIsSubmittingLead(false);
@@ -1291,6 +1770,28 @@ export default function IulV2ExportPage() {
           />
         ))}
       </div>
+    );
+  }
+
+  function renderRejectedPage() {
+    return (
+      <section
+        className="mx-auto flex min-h-[calc(100vh-120px)] w-full max-w-[760px] items-center justify-center px-4 py-10 text-center"
+        style={{ fontFamily: '"Montserrat", "HurmeGeo", Arial, sans-serif' }}
+      >
+        <div className="w-full rounded-[18px] border border-[#dbe7f5] bg-white px-6 py-10 shadow-[0_18px_45px_rgba(18,31,53,0.12)] md:px-10 md:py-12">
+          <div className="mx-auto flex h-[58px] w-[58px] items-center justify-center rounded-full bg-[#eef6ff] text-[var(--brand)]">
+            <ShieldCheckIcon className="h-[28px] w-[28px]" />
+          </div>
+          <h1 className="mx-auto mt-6 max-w-[560px] text-[28px] font-extrabold leading-[1.14] tracking-[-0.04em] text-[#101820] md:text-[40px]">
+            Gracias por tu interes
+          </h1>
+          <p className="mx-auto mt-4 max-w-[560px] text-[17px] leading-[1.55] text-[#5d6674] md:text-[19px]">
+            Actualmente este beneficio no esta disponible para tu grupo de edad.
+            Si en el futuro abrimos nuevas opciones, nos encantara ayudarte a revisarlas.
+          </p>
+        </div>
+      </section>
     );
   }
 
@@ -1571,10 +2072,9 @@ export default function IulV2ExportPage() {
             somos nosotros. ¡Contéstala!
           </p>
           <p className="mx-auto mt-6 max-w-[380px] text-[14px] leading-[1.6] text-white/55">
-            Best Life es una plataforma independiente de generación de leads de
-            seguros. No somos una aseguradora. Los asesores que te contactarán
-            están certificados y regulados por el departamento de seguros de su
-            estado.
+            Best Life es una plataforma independiente de información sobre
+            seguros. No somos una aseguradora. Los asesores mencionados están
+            certificados y regulados por el departamento de seguros de su estado.
           </p>
         </section>
       </div>
@@ -1585,7 +2085,7 @@ export default function IulV2ExportPage() {
     return (
       <div key={`panel-${panelKey}`} className="w-full">
         <div className="mx-auto flex w-full max-w-[760px] flex-col items-center">
-          <div className="flex w-full items-center justify-between gap-4">
+          <div className="flex w-full items-center justify-between gap-3 md:gap-4">
             <button
               type="button"
               onClick={goBack}
@@ -1595,10 +2095,19 @@ export default function IulV2ExportPage() {
               <BackArrowIcon className="h-[18px] w-[18px]" />
             </button>
             {renderProgress()}
-            <div className="w-[70px]" />
+            <div className="flex w-[58px] shrink-0 justify-end md:w-[70px]">
+              <span className="whitespace-nowrap text-[12px] font-black tracking-[-0.02em] text-[var(--brand-dark)] md:text-[13px]">
+                {progressLabel}
+              </span>
+            </div>
           </div>
 
-          <div className={`mt-7 text-center md:mt-9 ${animationClass}`}>
+          <div className={`mt-5 text-center md:mt-6 ${animationClass}`}>
+            {currentStep === "age" ? (
+              <p className="mx-auto mb-1 max-w-[520px] text-[14px] font-extrabold uppercase tracking-[0.04em] text-[var(--brand)] md:mb-1.5 md:text-[16px]">
+                Aplica para los beneficios IUL
+              </p>
+            ) : null}
             <h2 className="mx-auto max-w-[720px] text-[30px] leading-[1.16] font-bold tracking-[-0.05em] text-[#101820] md:text-[46px]">
               {currentStep === "age" && "¿En qué grupo de edad estás?"}
               {currentStep === "goal" &&
@@ -1622,9 +2131,12 @@ export default function IulV2ExportPage() {
                   className={optionButtonClass(
                     answers.ageGroup === option,
                     option === recommendedAgeOption
-                  )}
+                  ) + " justify-center text-center"}
                 >
-                  {option}
+                  <span className="inline-flex items-center justify-center gap-2 font-black tracking-[-0.02em]">
+                    <DialFingerIcon className="h-[23px] w-[23px] text-[#5d6674]" />
+                    <span>{option}</span>
+                  </span>
                 </button>
               ))}
             </div>
@@ -1642,9 +2154,36 @@ export default function IulV2ExportPage() {
                   className={optionButtonClass(
                     answers.insuranceGoal === option,
                     option === recommendedGoalOption
-                  )}
+                  ) + " justify-center text-center"}
                 >
-                  {option}
+                  {option === "Seguro de vida" ? (
+                    <span className="inline-flex items-center justify-center gap-2">
+                      <ShieldCheckIcon className="h-[22px] w-[22px] text-[#5d6674]" />
+                      <span>{option}</span>
+                    </span>
+                  ) : option === "Ahorrar e invertir" ? (
+                    <span className="inline-flex items-center justify-center gap-2">
+                      <StatisticGrowIcon className="h-[22px] w-[22px] text-[#5d6674]" />
+                      <span>{option}</span>
+                    </span>
+                  ) : option.normalize("NFC") === "Planificación de retiro" ? (
+                    <span className="inline-flex items-center justify-center gap-2">
+                      <RetirementPlanIcon className="h-[22px] w-[22px] text-[#5d6674]" />
+                      <span>{option}</span>
+                    </span>
+                  ) : option === "PlanificaciÃ³n de retiro" ? (
+                    <span className="inline-flex items-center justify-center gap-2">
+                      <RetirementPlanIcon className="h-[22px] w-[22px] text-[#5d6674]" />
+                      <span>{option}</span>
+                    </span>
+                  ) : option.normalize("NFC") === "No estoy seguro aún" ? (
+                    <span className="inline-flex items-center justify-center gap-2">
+                      <UnsureIcon className="h-[22px] w-[22px] text-[#5d6674]" />
+                      <span>{option}</span>
+                    </span>
+                  ) : (
+                    option
+                  )}
                 </button>
               ))}
             </div>
@@ -1739,7 +2278,7 @@ export default function IulV2ExportPage() {
 
               <button
                 type="button"
-                onClick={() => transitionTo("phone", "forward")}
+                onClick={() => void handleNameContinue()}
                 disabled={!answers.firstName.trim() || !answers.lastName.trim()}
                 className="inline-flex h-[54px] items-center justify-center gap-2 rounded-full bg-[var(--brand)] px-6 text-[18px] font-semibold text-white transition disabled:cursor-not-allowed disabled:opacity-45 hover:bg-[var(--brand-dark)]"
               >
@@ -1750,7 +2289,15 @@ export default function IulV2ExportPage() {
           ) : null}
 
           {currentStep === "phone" ? (
-            <div className={`mt-8 flex w-full max-w-[460px] flex-col gap-4 md:mt-10 ${animationClass}`}>
+            <form
+              className={`mt-8 flex w-full max-w-[460px] flex-col gap-4 md:mt-10 ${animationClass}`}
+              data-tf-element-role="offer"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void submitLead();
+              }}
+            >
+              <input type="hidden" name={trustedFormFieldName} />
               <div className="flex gap-3">
                 <select
                   value={answers.phoneCountry}
@@ -1765,23 +2312,44 @@ export default function IulV2ExportPage() {
                   <option value="US">US +1</option>
                 </select>
 
-                <input
-                  id="phone-number"
-                  name="tel"
-                  value={formatPhoneDigits(answers.phoneNumber)}
-                  onChange={(event) => {
-                    setAnswers((prev) => ({
-                      ...prev,
-                      phoneNumber: event.target.value,
-                    }));
-                    setPhoneError("");
-                  }}
-                  placeholder="000 000 0000"
-                  inputMode="tel"
-                  autoComplete="tel"
-                  enterKeyHint="next"
-                  className="h-[58px] min-w-0 flex-1 rounded-[16px] border border-[#9c9c9c] bg-white px-5 text-[17px] text-[#101820] outline-none transition focus:border-[var(--brand)]"
-                />
+                <div className="relative min-w-0 flex-1">
+                  <input
+                    id="phone-number"
+                    name="tel"
+                    value={formatPhoneDigits(answers.phoneNumber)}
+                    onChange={(event) => {
+                      setAnswers((prev) => ({
+                        ...prev,
+                        phoneNumber: normalizeUsPhoneInput(event.target.value),
+                      }));
+                      setHasBlurredPhone(false);
+                      setPhoneError("");
+                    }}
+                    onInput={(event) => {
+                      const nextPhone = normalizeUsPhoneInput(event.currentTarget.value);
+                      if (nextPhone !== answers.phoneNumber) {
+                        setAnswers((prev) => ({
+                          ...prev,
+                          phoneNumber: nextPhone,
+                        }));
+                      }
+                      setHasBlurredPhone(false);
+                      setPhoneError("");
+                    }}
+                    onBlur={() => setHasBlurredPhone(true)}
+                    placeholder="000 000 0000"
+                    inputMode="tel"
+                    autoComplete="tel"
+                    enterKeyHint="next"
+                    aria-invalid={phoneValidationStatus === "invalid" || !!phoneError}
+                    className={`h-[58px] w-full rounded-[16px] border bg-white px-5 pr-12 text-[17px] text-[#101820] outline-none transition ${phoneBorderClass}`}
+                  />
+                  {phoneValidationStatus !== "idle" ? (
+                    <span className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2">
+                      <PhoneStatusIcon status={phoneValidationStatus} />
+                    </span>
+                  ) : null}
+                </div>
               </div>
 
               <div className="relative">
@@ -1810,7 +2378,7 @@ export default function IulV2ExportPage() {
               </div>
 
               <p className="min-h-[22px] text-[14px] text-[#d14c4c]">
-                {phoneError}
+                {visiblePhoneError}
               </p>
 
               <p className="min-h-[22px] text-[14px] text-[#d14c4c]">
@@ -1818,8 +2386,9 @@ export default function IulV2ExportPage() {
               </p>
 
               <button
-                type="button"
-                onClick={() => void submitLead()}
+                type="submit"
+                name="submit-lead"
+                data-tf-element-role="submit"
                 disabled={isSubmittingLead}
                 className="inline-flex h-[54px] items-center justify-center gap-2 rounded-full bg-[var(--brand)] px-6 text-[18px] font-semibold text-white transition disabled:cursor-wait disabled:opacity-70 hover:bg-[var(--brand-dark)]"
               >
@@ -1834,10 +2403,30 @@ export default function IulV2ExportPage() {
                 )}
               </button>
 
+              <p
+                className="-mt-1 text-center text-[11px] leading-[1.45] text-[#6b7280]"
+                data-tf-element-role="consent-language"
+              >
+                Al hacer clic en <strong>“Ver mi cotización ahora”</strong>, doy mi consentimiento expreso por escrito y mi firma electrónica para que <strong>Best Life</strong>, sus{" "}
+                <Link href="/socios" className="font-bold text-[#4b5563] underline underline-offset-2">
+                  socios de mercadeo y aseguradoras licenciadas
+                </Link>{" "}
+                y cualquier persona que llame o envíe mensajes en su nombre, me contacten al número de teléfono y correo electrónico proporcionados incluso si están en alguna lista “No Llamar” estatal, federal o interna con fines de mercadeo de seguros de vida, IUL, gastos finales y productos financieros relacionados. Acepto que dichas comunicaciones pueden hacerse mediante{" "}
+                <strong>sistemas de marcación automática, marcadores predictivos, mensajes de voz pregrabada o artificial (incluyendo IA), y SMS automatizados.</strong>{" "}
+                Pueden aplicar tarifas estándar de mensajes y datos. <strong>Entiendo que este consentimiento no es condición para comprar ningún producto</strong> y que puedo revocarlo en cualquier momento respondiendo <strong>STOP</strong> a un SMS o usando el enlace de cancelación en los correos. He leído y acepto la{" "}
+                <Link href="/privacy" className="font-bold text-[#4b5563] underline underline-offset-2">
+                  Política de Privacidad
+                </Link>{" "}
+                y los{" "}
+                <Link href="/terms" className="font-bold text-[#4b5563] underline underline-offset-2">
+                  Términos de Uso
+                </Link>.
+              </p>
+
               <p className="min-h-[22px] text-[14px] text-[#d14c4c]">
                 {submitError}
               </p>
-            </div>
+            </form>
           ) : null}
 
           {currentStep === "email" ? (
@@ -1887,25 +2476,58 @@ export default function IulV2ExportPage() {
               </p>
             </div>
           ) : null}
+
+          <div className="mt-12 flex w-full max-w-[420px] items-center justify-center gap-4 md:mt-14">
+            {questionnaireSecuritySeals.map((seal) => (
+              <div
+                key={seal.src}
+                className="flex h-[28px] items-center justify-center opacity-90 grayscale-[0.08]"
+              >
+                <Image
+                  src={seal.src}
+                  alt={seal.alt}
+                  width={seal.width}
+                  height={seal.height}
+                  className="h-auto max-h-[28px] w-auto object-contain"
+                />
+              </div>
+            ))}
+          </div>
+          {false ? (
+          <div className="hidden">
+            <div className="inline-flex min-h-[46px] max-w-[360px] items-center justify-center gap-2 rounded-full bg-[var(--brand)] px-5 py-3 text-white shadow-[0_10px_20px_rgba(26,115,232,0.2)]">
+              <span className="text-center text-[14px] font-extrabold leading-[1.15] tracking-[-0.02em] md:text-[15px]">
+                En el siguiente paso llamarás a un asesor
+              </span>
+            </div>
+          </div>
+          ) : null}
         </div>
       </div>
     );
   }
 
+  if (ActivePreland) {
+    return <ActivePreland onContinue={continueFromPreland} />;
+  }
+
   return (
     <main className="min-h-screen bg-[var(--page-bg)] text-[var(--ink)]">
+      <noscript>
+        <img src="https://api.trustedform.com/ns.gif" alt="" />
+      </noscript>
       <style jsx global>{`
         @import url("https://fonts.googleapis.com/css2?family=Montserrat:wght@400;700;800&display=swap");
       `}</style>
-      <header className="border-b border-black/6 bg-white/96 shadow-[0_6px_18px_rgba(18,31,53,0.08)] backdrop-blur-sm">
+      <header className="border-b border-transparent bg-white/96 shadow-[0_6px_18px_rgba(18,31,53,0.08)] backdrop-blur-sm">
         <div className="mx-auto flex h-[60px] w-full max-w-[1200px] items-center justify-between px-4 md:relative md:justify-center">
           <Image
             src="/best-life-assets/logo-best-life.png"
             alt="Best Life"
-            width={180}
-            height={48}
+            width={190}
+            height={60}
             priority
-            className="h-auto w-[148px] md:w-[160px]"
+            className="h-[36px] w-[148px] object-contain md:h-[40px] md:w-[190px]"
           />
           <div className="flex items-center gap-2 text-[14px] font-semibold text-[#191919] md:absolute md:right-4">
             <Image
@@ -1919,7 +2541,9 @@ export default function IulV2ExportPage() {
         </div>
       </header>
 
-      {isSuccessPage ? (
+      {isRejectedPage ? (
+        renderRejectedPage()
+      ) : isSuccessPage ? (
         <section className="px-0 py-0 md:px-4 md:py-6">{renderSuccessPage()}</section>
       ) : (
         <>
@@ -1936,6 +2560,31 @@ export default function IulV2ExportPage() {
           </div>
         </>
       )}
+      <PopUp1
+        open={isPayPerCallPopupOpen}
+        firstName={submittedFirstName || answers.firstName}
+        goal={submittedInsuranceGoal || answers.insuranceGoal}
+        leadId={submittedLeadId}
+        continueUrl={submittedContinueUrl || "/thanks/call2"}
+        phoneNumber={runtimeConfig.payPerCallPhoneNumber}
+        ringbaCampaignId={runtimeConfig.ringbaCampaignId}
+        ringbaTags={{
+          funnel_id: "iul-v6",
+          lead_id: submittedLeadId,
+          iul_v6_age_group: answers.ageGroup,
+          iul_v6_insurance_goal: submittedInsuranceGoal || answers.insuranceGoal,
+        }}
+        onClose={() => setIsPayPerCallPopupOpen(false)}
+      />
+      <footer className="px-4 pb-5 pt-3 text-center text-[9px] leading-[1.45] text-[#b8bec8] md:text-[10px]">
+        <p>© 2025 Best Life. All Rights Reserved.</p>
+        <p className="mx-auto mt-2 max-w-[920px]">
+          This site is not part of Facebook or Meta Platforms, Inc. Additionally, this site is not endorsed by Facebook in any way. “Facebook” is a registered trademark of Meta Platforms, Inc.
+        </p>
+        <p className="mx-auto mt-2 max-w-[920px]">
+          Best Life is an independent promotional and advertising service. This website and the services offered are not sponsored, affiliated with, endorsed, or administered by Facebook. The content on this site has not been reviewed, approved, or certified by Facebook or any of its related entities.
+        </p>
+      </footer>
     </main>
   );
 }

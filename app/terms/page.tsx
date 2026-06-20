@@ -152,8 +152,8 @@ export default function TermsPage() {
               Si tienes dudas sobre estos Términos, puedes contactarnos
               directamente en Best Life.
             </p>
-            <p className="mt-3">Website: www.bestlife.com</p>
-            <p className="mt-3">Email: info@bestlife.com</p>
+            <p className="mt-3">Website: este sitio web</p>
+            <p className="mt-3">Email: disponible bajo solicitud</p>
           </section>
         </div>
       </section>

@@ -29,7 +29,7 @@ Debe localizar los archivos equivalentes existentes y aplicar/reemplazar solamen
 modificaciones documentadas:
 
 ```text
-components/pop-up1.tsx
+components/pop-ups/pop-up1.tsx
 app/thanks/call2/bench-call2-page.tsx
 ```
 
@@ -47,26 +47,26 @@ estructura, preservando cualquier logica exclusiva de ese proyecto.
 Este paquete ya incluye una copia de todos los assets necesarios dentro de:
 
 ```text
-migraciones/assets/best-money-assets/
+migraciones/assets/best-life-assets/
 ```
 
 Copiar el contenido completo de esa carpeta hacia:
 
 ```text
-public/best-money-assets/
+public/best-life-assets/
 ```
 
-Es decir, colocar estos archivos junto a los demas assets existentes de Best Money.
+Es decir, colocar estos archivos junto a los demas assets existentes de Best Life.
 No cambiar sus nombres ni crear una ruta distinta, porque el codigo los referencia desde
-`/best-money-assets/...`.
+`/best-life-assets/...`.
 
 Mapping de copia:
 
 | Origen | Destino requerido | Uso |
 |---|---|---|
-| `migraciones/assets/best-money-assets/vT8DJ.gif` | `public/best-money-assets/vT8DJ.gif` | Spinner del popup y thank-you page |
-| `migraciones/assets/best-money-assets/clipart2254363.png` | `public/best-money-assets/clipart2254363.png` | Icono de "Continuar con mi aplicacion" |
-| `migraciones/assets/best-money-assets/logo-best-life.png` | `public/best-money-assets/logo-best-life.png` | Logo del header de `/thanks/call2` |
+| `migraciones/assets/best-life-assets/vT8DJ.gif` | `public/best-life-assets/vT8DJ.gif` | Spinner del popup y thank-you page |
+| `migraciones/assets/best-life-assets/clipart2254363.png` | `public/best-life-assets/clipart2254363.png` | Icono de "Continuar con mi aplicacion" |
+| `migraciones/assets/best-life-assets/logo-best-life.png` | `public/best-life-assets/logo-best-life.png` | Logo del header de `/thanks/call2` |
 
 Dimensiones/peso observados:
 
@@ -95,17 +95,17 @@ import { buildApplicationNumber } from "@/lib/application-number";
 import {
   createEventId,
   getUtmParams,
-  pushGtmEvent,
-  type GtmEventPayload,
-} from "@/lib/gtm-events";
+  trackFunnelEvent,
+  type AnalyticsEventPayload,
+} from "@/lib/analytics-events";
 ```
 
 Si el proyecto destino no tiene estas utilidades, copiar sus implementaciones desde:
 
 - `lib/application-number.ts`
-- `lib/gtm-events.ts`
+- `lib/analytics-events.ts`
 
-`pushGtmEvent` escribe en `window.dataLayer`, reporta eventos Vercel del funnel y envia
+`trackFunnelEvent` reporta eventos Vercel del funnel y envia
 eventos al endpoint `/api/facebook-events`. Si el destino no usa Facebook CAPI, el agente
 debe adaptar esa utilidad, no eliminar silenciosamente el evento `Contact`.
 
@@ -138,7 +138,7 @@ migraciones/01-pop-up1.tsx
 y aplicar sobre el archivo existente:
 
 ```text
-components/pop-up1.tsx
+components/pop-ups/pop-up1.tsx
 ```
 
 ### Props
@@ -169,7 +169,7 @@ existentes, aunque el diseño final ya no los usa visualmente.
 Import:
 
 ```tsx
-import PopUp1 from "@/components/pop-up1";
+import PopUp1 from "@/components/pop-ups/pop-up1";
 ```
 
 Estado minimo:
@@ -178,7 +178,7 @@ Estado minimo:
 const [isPayPerCallPopupOpen, setIsPayPerCallPopupOpen] = useState(false);
 ```
 
-Integracion final utilizada en `app/iul-v4/page.tsx`:
+Integracion final utilizada en `app/iul-v6/page.tsx`:
 
 ```tsx
 <PopUp1
@@ -190,10 +190,10 @@ Integracion final utilizada en `app/iul-v4/page.tsx`:
   phoneNumber={runtimeConfig.payPerCallPhoneNumber}
   ringbaCampaignId={runtimeConfig.ringbaCampaignId}
   ringbaTags={{
-    funnel_id: "iul-v4",
+    funnel_id: "iul-v6",
     lead_id: submittedLeadId,
-    iul_v4_age_group: answers.ageGroup,
-    iul_v4_insurance_goal:
+    iul_v6_age_group: answers.ageGroup,
+    iul_v6_insurance_goal:
       submittedInsuranceGoal || answers.insuranceGoal,
   }}
   onClose={() => setIsPayPerCallPopupOpen(false)}
@@ -211,7 +211,7 @@ pay-per-call esta abierta.
 
 ### Preview local
 
-Se agrego este efecto en `app/iul-v4/page.tsx`:
+Se agrego este efecto en `app/iul-v6/page.tsx`:
 
 ```tsx
 useEffect(() => {
@@ -229,7 +229,7 @@ useEffect(() => {
 URL:
 
 ```text
-http://localhost:3000/iul-v4?preview_popup1=1
+http://localhost:3000/iul-v6?preview_popup1=1
 ```
 
 La condicion `NODE_ENV === "development"` evita activar el preview en produccion.
@@ -304,7 +304,7 @@ El componente:
 Al hacer clic se envia:
 
 ```ts
-pushGtmEvent("Contact", {
+trackFunnelEvent("Contact", {
   event_id: createEventId("contact"),
   funnel_id: ringbaTags.funnel_id || "popup",
   lead_id: leadId || undefined,
@@ -337,8 +337,8 @@ modificarlos solo si les faltan estas conexiones; no crear duplicados:
 ```tsx
 // app/thanks/call2/page.tsx
 import { Suspense } from "react";
-import ThanksCall2Client from "./thanks-call2-client";
-import VercelThankYouTracker from "../vercel-thank-you-tracker";
+import VercelThankYouTracker from "../_components/vercel-thank-you-tracker";
+import ThanksCall2Client from "./_components/thanks-call2-client";
 
 export default function ThanksCall2Page() {
   return (
@@ -533,10 +533,10 @@ El wrapper usa:
 
 El componente registra:
 
-- `v4_thankyou_call`
-- virtual page `/iul-v4/v4_thankyou_call`
+- `v6_thankyou_call`
+- virtual page `/iul-v6/v6_thankyou_call`
 
-Solo lo hace si `funnel_id=iul-v4`.
+Solo lo hace si `funnel_id=iul-v6`.
 
 Si el proyecto destino no usa `@vercel/analytics`, eliminar este tracker del wrapper o
 adaptarlo conscientemente. No afecta Ringba ni la UI.
@@ -560,11 +560,11 @@ adaptarlo conscientemente. No afecta Ringba ni la UI.
 
 ## Orden de implementacion recomendado
 
-1. Copiar todos los archivos de `migraciones/assets/best-money-assets/` dentro de
-   `public/best-money-assets/`, junto a los demas assets existentes.
-2. Verificar `@/lib/gtm-events` y `@/lib/application-number`.
+1. Copiar todos los archivos de `migraciones/assets/best-life-assets/` dentro de
+   `public/best-life-assets/`, junto a los demas assets existentes.
+2. Verificar `@/lib/analytics-events` y `@/lib/application-number`.
 3. Verificar o adaptar `/api/call-attribution`.
-4. Comparar `01-pop-up1.tsx` con el `components/pop-up1.tsx` existente y aplicar los cambios.
+4. Comparar `01-pop-up1.tsx` con el `components/pop-ups/pop-up1.tsx` existente y aplicar los cambios.
 5. Verificar las props y el estado del popup ya integrados en la pagina del funnel.
 6. Comparar `02-thanks-call2-bench.tsx` con el archivo existente y aplicar los cambios.
 7. Verificar los wrappers existentes `page.tsx` y `thanks-call2-client.tsx`; no duplicarlos.
@@ -579,13 +579,13 @@ adaptarlo conscientemente. No afecta Ringba ni la UI.
 Popup:
 
 ```text
-http://localhost:3000/iul-v4?preview_popup1=1
+http://localhost:3000/iul-v6?preview_popup1=1
 ```
 
 Thank-you:
 
 ```text
-http://localhost:3000/thanks/call2?funnel_id=iul-v4&first_name=juan%20carlos&age_group=35%20a%2044&insurance_goal=Ahorrar%20e%20invertir&lead_id=UUID&application_number=AP-8372&ppc_phone=18882882203&ringba_campaign_id=CA...
+http://localhost:3000/thanks/call2?funnel_id=iul-v6&first_name=juan%20carlos&age_group=35%20a%2044&insurance_goal=Ahorrar%20e%20invertir&lead_id=UUID&application_number=AP-8372&ppc_phone=18882882203&ringba_campaign_id=CA...
 ```
 
 ## Checklist funcional
@@ -681,11 +681,11 @@ Pregunta concreta:
 
 Ejemplos de preguntas utiles:
 
-- "En `components/pop-up1.tsx`, el proyecto destino no tiene
+- "En `components/pop-ups/pop-up1.tsx`, el proyecto destino no tiene
   `/api/call-attribution`. ¿Que contrato minimo debe conservar el endpoint?"
-- "En `app/iul-v4/page.tsx`, el runtime config usa otros nombres. ¿Que prop debe mapearse
+- "En `app/iul-v6/page.tsx`, el runtime config usa otros nombres. ¿Que prop debe mapearse
   a `phoneNumber` y cual a `ringbaCampaignId`?"
-- "En `lib/gtm-events.ts`, `pushGtmEvent` tiene otra firma. ¿Que campos del evento
+- "En `lib/analytics-events.ts`, `trackFunnelEvent` tiene otra firma. ¿Que campos del evento
   `Contact` son obligatorios para esta migracion?"
 - "En `app/thanks/call2/thanks-call2-client.tsx`, el destino recibe `phone` en vez de
   `ppc_phone`. ¿Se debe soportar ambos query params?"
