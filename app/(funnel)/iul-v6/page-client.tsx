@@ -10,7 +10,6 @@ import {
   createEventId,
   getUtmParams,
   trackFunnelEvent,
-  trackVercelIulV6VirtualPage,
 } from "@/lib/analytics-events";
 import { inferUsZipFromStateAndPhone } from "@/lib/infer-us-zip";
 
@@ -144,6 +143,12 @@ type FunnelStep =
   | "email"
   | "rejected"
   | "success";
+
+// Internal funnel contract for iul-v6:
+// funnel_id is `iul-v6`.
+// Business steps are: preland (only when `?preland=...` is active), age, goal,
+// zip, name, contact, and submit. UI code still uses `state` for the ZIP screen
+// and `phone` for the contact screen, so keep that mapping in mind when editing.
 
 type FunnelAnswers = {
   zipCode: string;
@@ -1485,14 +1490,6 @@ export default function IulV6Client({ initialPrelandName }: IulV6ClientProps) {
     if (currentStep !== "state" || shouldAskZipCode) return;
     if (!trackedAutoZipRef.current) {
       trackedAutoZipRef.current = true;
-      trackVercelIulV6VirtualPage("v6_step3_zip", {
-        step: "state",
-        step_number: 3,
-        zip_detected: true,
-        country: "us",
-        state: getAnalyticsState(resolvedUsState || detectedUsState),
-        zip_code: answers.zipCode || undefined,
-      });
     }
     transitionTo("name", "forward");
   }, [answers.zipCode, currentStep, detectedUsState, isPrelandActive, isRejectedPage, resolvedUsState, shouldAskZipCode]);
@@ -1624,14 +1621,6 @@ export default function IulV6Client({ initialPrelandName }: IulV6ClientProps) {
 
     if (field === "insuranceGoal" && nextStep === "name" && !trackedAutoZipRef.current) {
       trackedAutoZipRef.current = true;
-      trackVercelIulV6VirtualPage("v6_step3_zip", {
-        step: "state",
-        step_number: 3,
-        zip_detected: true,
-        country: "us",
-        state: getAnalyticsState(resolvedUsState || detectedUsState),
-        zip_code: answers.zipCode || undefined,
-      });
     }
 
     setAnswers((prev) => ({ ...prev, [field]: value }));

@@ -86,7 +86,6 @@ Los componentes usan:
 - `next/image`.
 - `next/script`.
 - Alias TypeScript `@/`.
-- `@vercel/analytics` si se copia el tracker de thank-you.
 
 Imports internos requeridos:
 
@@ -105,9 +104,9 @@ Si el proyecto destino no tiene estas utilidades, copiar sus implementaciones de
 - `lib/application-number.ts`
 - `lib/analytics-events.ts`
 
-`trackFunnelEvent` reporta eventos Vercel del funnel y envia
-eventos al endpoint `/api/facebook-events`. Si el destino no usa Facebook CAPI, el agente
-debe adaptar esa utilidad, no eliminar silenciosamente el evento `Contact`.
+`trackFunnelEvent` es una superficie interna de tracking y actualmente no envia
+eventos a Vercel Analytics. Si se agrega otro proveedor, adaptarlo ahi para no
+repartir logica de analytics por los componentes.
 
 ## Variables de entorno
 
@@ -337,13 +336,11 @@ modificarlos solo si les faltan estas conexiones; no crear duplicados:
 ```tsx
 // app/thanks/call2/page.tsx
 import { Suspense } from "react";
-import VercelThankYouTracker from "../_components/vercel-thank-you-tracker";
 import ThanksCall2Client from "./_components/thanks-call2-client";
 
 export default function ThanksCall2Page() {
   return (
     <Suspense fallback={null}>
-      <VercelThankYouTracker thankYouType="call" />
       <ThanksCall2Client />
     </Suspense>
   );
@@ -522,24 +519,6 @@ El destino necesita:
 
 Si el otro proyecto no usa Supabase, conservar el contrato HTTP y adaptar solo la
 persistencia del endpoint.
-
-## Vercel thank-you tracker
-
-El wrapper usa:
-
-```tsx
-<VercelThankYouTracker thankYouType="call" />
-```
-
-El componente registra:
-
-- `v6_thankyou_call`
-- virtual page `/iul-v6/v6_thankyou_call`
-
-Solo lo hace si `funnel_id=iul-v6`.
-
-Si el proyecto destino no usa `@vercel/analytics`, eliminar este tracker del wrapper o
-adaptarlo conscientemente. No afecta Ringba ni la UI.
 
 ## Mapping: antes -> despues
 

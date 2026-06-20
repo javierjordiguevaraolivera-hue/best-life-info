@@ -475,6 +475,8 @@ export async function POST(request: Request) {
   );
   const submittedAt = new Date().toISOString();
   const funnelId = getFunnelId(body.page);
+  // Internal funnel contract: this POST is the `submit` step for funnel_id `iul-v6`.
+  // Earlier UI steps are preland (optional), age, goal, zip, name, and contact.
   const state = normalizeState(restAnswers.state);
   const zipCode = normalizeZipCode(restAnswers.zipCode);
   const salePath = body.meta?.salePath === "call" ? "call" : "lead";
