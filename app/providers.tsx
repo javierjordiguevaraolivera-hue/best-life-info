@@ -4,6 +4,7 @@ import posthog from "posthog-js";
 import { usePathname, useSearchParams } from "next/navigation";
 import { Suspense, useEffect } from "react";
 import { PostHogProvider as PHProvider, usePostHog } from "posthog-js/react";
+import { initMetaPixel } from "@/lib/meta-pixel";
 
 function PostHogPageView() {
   const pathname = usePathname();
@@ -24,6 +25,8 @@ function PostHogPageView() {
 
 export function PostHogProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
+    initMetaPixel();
+
     const posthogKey = process.env.NEXT_PUBLIC_POSTHOG_KEY?.trim();
     if (!posthogKey) return;
 

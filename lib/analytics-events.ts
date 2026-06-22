@@ -1,4 +1,5 @@
 import posthog from "posthog-js";
+import { trackMetaPixelEvent } from "@/lib/meta-pixel";
 
 export type AnalyticsEventPayload = Record<string, string | number | boolean | null | undefined>;
 
@@ -50,6 +51,31 @@ function getPostHogStep(event: string, payload: AnalyticsEventPayload) {
   return normalizeIulV6Step(payload.step);
 }
 
+function trackMetaFunnelEvent(event: string, payload: AnalyticsEventPayload, step?: string) {
+  // Meta Pixel is intentionally narrower than PostHog:
+  // - PageView fires only when the user reaches the age step.
+  // - Lead fires only after Supabase accepts the lead.
+  // Keep all Meta calls here so components never call `fbq` directly.
+  if (event === "PageView" && step === "age") {
+    trackMetaPixelEvent("PageView", {
+      ...payload,
+      funnel_id: "iul-v6",
+      step: "age",
+      step_number: iulV6StepNumbers.age,
+    });
+    return;
+  }
+
+  if (event === "Lead") {
+    trackMetaPixelEvent("Lead", {
+      ...payload,
+      funnel_id: "iul-v6",
+      step: "submit",
+      step_number: iulV6StepNumbers.submit,
+    });
+  }
+}
+
 export function trackFunnelEvent(event: string, payload: AnalyticsEventPayload = {}) {
   if (typeof window === "undefined") return;
 
@@ -59,14 +85,16 @@ export function trackFunnelEvent(event: string, payload: AnalyticsEventPayload =
   const step = getPostHogStep(event, payload);
   const stepNumber = step ? iulV6StepNumbers[step] : undefined;
 
-  // PostHog is the single active client analytics provider. Keep this wrapper
-  // as the only place that translates internal funnel events into provider names.
+  // This wrapper is the only place that translates internal funnel events into
+  // vendor events. Keep PostHog and Meta here to avoid duplicated provider calls.
   posthog.capture(getPostHogEventName(event), {
     ...payload,
     funnel_id: "iul-v6",
     step,
     step_number: stepNumber ?? payload.step_number,
   });
+
+  trackMetaFunnelEvent(event, payload, step);
 }
 
 export function getUtmParams() {
