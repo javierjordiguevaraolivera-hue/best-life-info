@@ -9,6 +9,7 @@ import { buildApplicationNumber } from "@/lib/application-number";
 import {
   createEventId,
   getUtmParams,
+  identifyFunnelPerson,
   trackFunnelEvent,
 } from "@/lib/analytics-events";
 import { inferUsZipFromStateAndPhone } from "@/lib/infer-us-zip";
@@ -405,7 +406,7 @@ function getPhoneLengthValidationMessage(value: string) {
   const digits = normalizeUsPhoneInput(value);
 
   if (digits.length !== 10) {
-    return "Ingresa un numero valido de EE.UU. con 10 digitos.";
+    return "Ingresa un numero contactable de 10 digitos.";
   }
 
   return "";
@@ -1310,7 +1311,7 @@ export default function IulV6Client({ initialPrelandName }: IulV6ClientProps) {
           }
 
           setVerifiedPhone("");
-          setPhoneError(data?.reason || "Ingresa un numero movil valido de EE.UU.");
+          setPhoneError(data?.reason || "Ingresa un numero movil contactable.");
         })
         .catch(() => {
           if (phoneVerificationRequestRef.current !== requestId) return;
@@ -1802,6 +1803,12 @@ export default function IulV6Client({ initialPrelandName }: IulV6ClientProps) {
   async function handleNameContinue() {
     if (!answers.firstName.trim() || !answers.lastName.trim()) return;
 
+    identifyFunnelPerson({
+      funnel_id: "iul-v6",
+      first_name: answers.firstName.trim(),
+      last_name: answers.lastName.trim(),
+    });
+
     setSubmitError("");
     transitionTo("phone", "forward");
 
@@ -1857,7 +1864,7 @@ export default function IulV6Client({ initialPrelandName }: IulV6ClientProps) {
     }
 
     if (!isPhoneVerified) {
-      const validationReason = phoneVerificationData?.reason || "Ingresa un numero movil valido de EE.UU.";
+      const validationReason = phoneVerificationData?.reason || "Ingresa un numero movil contactable.";
       setPhoneError(validationReason);
       trackFunnelEvent("PhoneValidation", {
         event_id: createEventId("phone_validation"),
@@ -2059,6 +2066,15 @@ export default function IulV6Client({ initialPrelandName }: IulV6ClientProps) {
       }
 
       const nextSearch = nextParams.toString() ? `?${nextParams.toString()}` : "";
+
+      identifyFunnelPerson({
+        funnel_id: "iul-v6",
+        first_name: completedAnswers.firstName.trim(),
+        last_name: completedAnswers.lastName.trim(),
+        email: completedAnswers.email.trim(),
+        phone_number: normalizedPhone,
+        lead_id: leadId || "",
+      });
 
       trackFunnelEvent("Lead", {
         ...getAnalyticsLeadPayload(),

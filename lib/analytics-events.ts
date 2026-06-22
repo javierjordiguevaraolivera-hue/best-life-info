@@ -3,6 +3,15 @@ import { trackMetaPixelEvent } from "@/lib/meta-pixel";
 
 export type AnalyticsEventPayload = Record<string, string | number | boolean | null | undefined>;
 
+type IdentifyFunnelPersonPayload = {
+  funnel_id?: string;
+  first_name?: string | null;
+  last_name?: string | null;
+  email?: string | null;
+  phone_number?: string | null;
+  lead_id?: string | null;
+};
+
 const iulV6StepAliases: Record<string, string> = {
   preland: "preland",
   age: "age",
@@ -24,6 +33,8 @@ const iulV6StepNumbers: Record<string, number> = {
   contact: 5,
   submit: 6,
 };
+
+let lastPostHogIdentifySignature = "";
 
 export function createEventId(prefix: string) {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
@@ -95,6 +106,36 @@ export function trackFunnelEvent(event: string, payload: AnalyticsEventPayload =
   });
 
   trackMetaFunnelEvent(event, payload, step);
+}
+
+export function identifyFunnelPerson(payload: IdentifyFunnelPersonPayload) {
+  if (typeof window === "undefined") return;
+  if (payload.funnel_id !== "iul-v6") return;
+
+  // Keep PostHog's own anonymous Distinct ID instead of replacing it with our
+  // app device ID. `identify` attaches person properties to the same visitor.
+  const distinctId = posthog.get_distinct_id();
+  const firstName = String(payload.first_name || "").trim();
+  const lastName = String(payload.last_name || "").trim();
+  if (!distinctId || !firstName || !lastName) return;
+
+  const personProperties = {
+    first_name: firstName,
+    last_name: lastName,
+    name: `${firstName} ${lastName}`.trim(),
+    ...(payload.email ? { email: String(payload.email).trim().toLowerCase() } : {}),
+    ...(payload.phone_number ? { phone_number: String(payload.phone_number).trim() } : {}),
+    ...(payload.lead_id ? { lead_id: String(payload.lead_id).trim() } : {}),
+    funnel_id: "iul-v6",
+  };
+  const signature = JSON.stringify({ distinctId, personProperties });
+
+  // Avoid repeating identify with the exact same person payload during React
+  // re-renders or repeated button taps.
+  if (signature === lastPostHogIdentifySignature) return;
+  lastPostHogIdentifySignature = signature;
+
+  posthog.identify(distinctId, personProperties);
 }
 
 export function getUtmParams() {

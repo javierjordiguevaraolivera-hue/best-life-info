@@ -4,7 +4,6 @@ import { leadTokenCookieName } from "@/app/api/(lead)/lead-token/route";
 import { buildApplicationNumber } from "@/lib/application-number";
 import {
   getPhoneLengthMessage,
-  isVeriphoneMobileResult,
   normalizeUsPhone,
   type VeriphoneResponse,
   verifyPhoneVerificationToken,
@@ -364,10 +363,9 @@ export async function POST(request: Request) {
     | (VeriphoneResponse & { veriphone?: VeriphoneResponse | null; verificationToken?: unknown })
     | null
     | undefined;
-  // /api/phone-verify returns a small envelope for the UI. Supabase should store
-  // only the raw Veriphone payload, and validation should read that raw payload.
+  // /api/phone-verify is the only place that evaluates Veriphone criteria.
+  // This submit endpoint trusts its signed token and only checks phone matching.
   const phoneVerification = phoneVerificationEnvelope?.veriphone || phoneVerificationEnvelope || null;
-  const isVerifiedMobile = !!phoneVerification && isVeriphoneMobileResult(phoneVerification);
   const phoneVerificationMatches =
     normalizeUsPhone(phoneVerification?.phone || phoneVerification?.e164 || normalizedPhone) === normalizedPhone;
   const hasVerifiedPhoneToken = verifyPhoneVerificationToken(
@@ -379,14 +377,12 @@ export async function POST(request: Request) {
   const phoneValidationFlags = [
     ...(phoneLengthMessage ? ["invalid_length"] : []),
     ...(phoneVerification ? [] : ["veriphone_missing_result"]),
-    ...(isVerifiedMobile ? [] : ["veriphone_unverified_mobile"]),
     ...(phoneVerificationMatches ? [] : ["veriphone_phone_mismatch"]),
     ...(hasVerifiedPhoneToken ? [] : ["veriphone_missing_or_expired_token"]),
   ];
   const phoneValidation = {
     isValid:
       !phoneLengthMessage &&
-      isVerifiedMobile &&
       phoneVerificationMatches &&
       hasVerifiedPhoneToken,
     normalized: normalizedPhone,
@@ -394,7 +390,7 @@ export async function POST(request: Request) {
       phoneLengthMessage ||
       (!phoneVerification
         ? "Espera a que terminemos de verificar el numero."
-        : "Ingresa un numero movil valido de EE.UU."),
+        : "Ingresa un numero movil contactable."),
     flags: phoneValidationFlags,
     veriphone: phoneVerification,
   };
@@ -432,7 +428,7 @@ export async function POST(request: Request) {
   if (!phoneValidation.isValid) {
     return NextResponse.json(
       {
-        error: phoneValidation.reason || "Ingresa un numero valido de EE.UU.",
+        error: phoneValidation.reason || "Ingresa un numero movil contactable.",
         riskFlags,
       },
       { status: 422 }

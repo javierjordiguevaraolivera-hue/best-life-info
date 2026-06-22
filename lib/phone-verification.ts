@@ -62,17 +62,22 @@ export function normalizeUsPhone(value: unknown) {
 export function getPhoneLengthMessage(value: unknown) {
   return normalizeUsPhone(value).length === 10
     ? ""
-    : "Ingresa un numero valido de EE.UU. con 10 digitos.";
+    : "Ingresa un numero contactable de 10 digitos.";
 }
 
-export function isVeriphoneMobileResult(data: VeriphoneResponse) {
+function isAllowedVeriphonePhoneType(value: unknown) {
+  const phoneType = String(value || "").trim().toLowerCase();
+  return phoneType === "mobile" || phoneType === "fixed_line" || phoneType === "fixed_line_or_mobile";
+}
+
+export function isVeriphoneAllowedPhoneResult(data: VeriphoneResponse) {
   const carrier = String(data.carrier || "").trim().toLowerCase();
   const countryCode = String(data.country_code || "").trim().toUpperCase();
   const country = String(data.country || "").trim().toLowerCase();
 
   return (
     data.phone_valid === true &&
-    data.phone_type === "mobile" &&
+    isAllowedVeriphonePhoneType(data.phone_type) &&
     !!carrier &&
     carrier !== "unknown" &&
     (countryCode === "US" || country === "united states")
@@ -125,7 +130,7 @@ export async function verifyPhoneWithVeriphone(value: unknown): Promise<PhoneVer
     return {
       isValid: false,
       normalized,
-      reason: "Ingresa un numero valido de EE.UU. con 10 digitos.",
+      reason: "Ingresa un numero contactable de 10 digitos.",
       flags: ["invalid_length"],
     };
   }
@@ -162,12 +167,12 @@ export async function verifyPhoneWithVeriphone(value: unknown): Promise<PhoneVer
     };
   }
 
-  const isValid = isVeriphoneMobileResult(data);
+  const isValid = isVeriphoneAllowedPhoneResult(data);
   const countryCode = String(data.country_code || "").trim().toUpperCase();
   const country = String(data.country || "").trim().toLowerCase();
   const flags = [
     ...(data.phone_valid === true ? [] : ["veriphone_invalid_phone"]),
-    ...(data.phone_type === "mobile" ? [] : ["veriphone_not_mobile"]),
+    ...(isAllowedVeriphonePhoneType(data.phone_type) ? [] : ["veriphone_disallowed_phone_type"]),
     ...(
       String(data.carrier || "").trim() &&
       String(data.carrier || "").trim().toLowerCase() !== "unknown"
@@ -180,7 +185,7 @@ export async function verifyPhoneWithVeriphone(value: unknown): Promise<PhoneVer
   return {
     isValid,
     normalized,
-    reason: isValid ? undefined : "Ingresa un numero movil valido de Estados Unidos.",
+    reason: isValid ? undefined : "Ingresa un numero movil contactable.",
     flags,
     veriphone: data,
   };
