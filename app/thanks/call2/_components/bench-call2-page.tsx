@@ -284,8 +284,8 @@ export default function BenchCall2Page({
     ringbaWindow._rgba_tags = ringbaWindow._rgba_tags || [];
     ringbaWindow._rgba_tags.push({ btn_source: "thanks" });
 
-    trackFunnelEvent("Contact", {
-      event_id: createEventId("contact"),
+    trackFunnelEvent("call_clicked", {
+      event_id: createEventId("call_clicked"),
       lead_id: leadId || undefined,
       external_id: leadId || undefined,
       funnel_id: funnelId || "iul-v6",

@@ -11,6 +11,7 @@ import {
   getUtmParams,
   identifyFunnelPerson,
   trackFunnelEvent,
+  type AnalyticsEventPayload,
 } from "@/lib/analytics-events";
 import { inferUsZipFromStateAndPhone } from "@/lib/infer-us-zip";
 
@@ -1156,6 +1157,24 @@ export default function IulV6Client({ initialPrelandName }: IulV6ClientProps) {
     };
   }
 
+  function trackFunnelOnce(event: string, payload: AnalyticsEventPayload) {
+    const trackingKey = `event:${event}`;
+    if (trackedStepsRef.current.has(trackingKey)) return;
+
+    trackedStepsRef.current.add(trackingKey);
+    trackFunnelEvent(event, payload);
+  }
+
+  function trackFunnelError(step: string, errorType: string, errorReason: string) {
+    trackFunnelEvent("funnel_error", {
+      ...getAnalyticsLeadPayload(),
+      event_id: createEventId("funnel_error"),
+      step,
+      error_type: errorType,
+      error_reason: errorReason,
+    });
+  }
+
   useEffect(() => {
     leadUrlRef.current = window.location.href;
   }, []);
@@ -1180,7 +1199,7 @@ export default function IulV6Client({ initialPrelandName }: IulV6ClientProps) {
     if (!isPrelandActive || trackedStepsRef.current.has("preland")) return;
 
     trackedStepsRef.current.add("preland");
-    trackFunnelEvent("PageView", {
+    trackFunnelOnce("preland", {
       ...getAnalyticsLeadPayload(),
       event_id: createEventId("preland"),
       step: "preland",
@@ -1289,22 +1308,19 @@ export default function IulV6Client({ initialPrelandName }: IulV6ClientProps) {
           setPhoneVerificationData(data);
           setIsPhoneValidating(false);
 
-          trackFunnelEvent("PhoneValidation", {
-            event_id: createEventId("phone_validation"),
-            funnel_id: "iul-v6",
-            step: "contact",
-            step_number: 5,
-            phone_number: normalizedPhone,
-            email: lowerAnalyticsValue(answers.email),
-            validation_passed: Boolean(response.ok && data?.ok),
-            validation_reason: data?.reason || undefined,
-            phone_type: data?.veriphone?.phone_type || undefined,
-            carrier: data?.veriphone?.carrier || undefined,
-            country_code: data?.veriphone?.country_code || undefined,
-            e164: data?.veriphone?.e164 || undefined,
-          });
-
           if (response.ok && data?.ok) {
+            trackFunnelOnce("veriphone_verified", {
+              ...getAnalyticsLeadPayload(),
+              event_id: createEventId("veriphone_verified"),
+              step: "contact",
+              step_number: 5,
+              phone_number: normalizedPhone,
+              email: lowerAnalyticsValue(answers.email),
+              phone_type: data.veriphone?.phone_type || undefined,
+              carrier: data.veriphone?.carrier || undefined,
+              country_code: data.veriphone?.country_code || undefined,
+              e164: data.veriphone?.e164 || undefined,
+            });
             setVerifiedPhone(normalizedPhone);
             setPhoneError("");
             return;
@@ -1312,6 +1328,20 @@ export default function IulV6Client({ initialPrelandName }: IulV6ClientProps) {
 
           setVerifiedPhone("");
           setPhoneError(data?.reason || "Ingresa un numero movil contactable.");
+          trackFunnelEvent("veriphone_failed", {
+            ...getAnalyticsLeadPayload(),
+            event_id: createEventId("veriphone_failed"),
+            step: "contact",
+            step_number: 5,
+            phone_number: normalizedPhone,
+            email: lowerAnalyticsValue(answers.email),
+            validation_passed: false,
+            validation_reason: data?.reason || undefined,
+            phone_type: data?.veriphone?.phone_type || undefined,
+            carrier: data?.veriphone?.carrier || undefined,
+            country_code: data?.veriphone?.country_code || undefined,
+            e164: data?.veriphone?.e164 || undefined,
+          });
         })
         .catch(() => {
           if (phoneVerificationRequestRef.current !== requestId) return;
@@ -1319,6 +1349,16 @@ export default function IulV6Client({ initialPrelandName }: IulV6ClientProps) {
           setVerifiedPhone("");
           setIsPhoneValidating(false);
           setPhoneError("No pudimos verificar el numero ahora mismo.");
+          trackFunnelEvent("veriphone_failed", {
+            ...getAnalyticsLeadPayload(),
+            event_id: createEventId("veriphone_failed"),
+            step: "contact",
+            step_number: 5,
+            phone_number: normalizedPhone,
+            email: lowerAnalyticsValue(answers.email),
+            validation_passed: false,
+            validation_reason: "No pudimos verificar el numero ahora mismo.",
+          });
         });
     }, 350);
 
@@ -1329,34 +1369,6 @@ export default function IulV6Client({ initialPrelandName }: IulV6ClientProps) {
       }
     };
   }, [answers.email, hasBlurredPhone, hasCompletePhone, normalizedPhone, verifiedPhone]);
-
-  useEffect(() => {
-    if (isPrelandActive || isRejectedPage || currentQuestionIndex < 0) return;
-
-    const trackingKey = `${currentQuestionIndex}:${currentStep}`;
-    if (trackedStepsRef.current.has(trackingKey)) return;
-
-    trackedStepsRef.current.add(trackingKey);
-    trackFunnelEvent(currentQuestionIndex === 0 ? "PageView" : "ViewContent", {
-      ...getAnalyticsLeadPayload(),
-      event_id: createEventId(currentQuestionIndex === 0 ? "pageview" : "viewcontent"),
-      step_number: currentQuestionIndex + 1,
-    });
-  }, [
-    currentQuestionIndex,
-    currentStep,
-    isRejectedPage,
-    answers.state,
-    answers.detectedState,
-    answers.zipCode,
-    answers.ageGroup,
-    answers.insuranceGoal,
-    answers.firstName,
-    answers.lastName,
-    answers.email,
-    normalizedPhone,
-    isPrelandActive,
-  ]);
 
   useEffect(() => {
     if (isPrelandActive) return;
@@ -1563,9 +1575,9 @@ export default function IulV6Client({ initialPrelandName }: IulV6ClientProps) {
       trackedAutoZipRef.current = true;
       // ZIP can be skipped when location is already inferred; still record the
       // canonical `zip` step so PostHog has the full funnel sequence.
-      trackFunnelEvent("ViewContent", {
+      trackFunnelOnce("step_zip", {
         ...getAnalyticsLeadPayload(),
-        event_id: createEventId("viewcontent"),
+        event_id: createEventId("step_zip"),
         step: "zip",
         step_number: 3,
         zip_detected: true,
@@ -1699,12 +1711,32 @@ export default function IulV6Client({ initialPrelandName }: IulV6ClientProps) {
       return;
     }
 
+    if (field === "ageGroup") {
+      trackFunnelOnce("step_age", {
+        ...getAnalyticsLeadPayload(),
+        event_id: createEventId("step_age"),
+        step: "age",
+        step_number: 1,
+        age_group: lowerAnalyticsValue(String(value)),
+      });
+    }
+
+    if (field === "insuranceGoal") {
+      trackFunnelOnce("step_goal", {
+        ...getAnalyticsLeadPayload(),
+        event_id: createEventId("step_goal"),
+        step: "goal",
+        step_number: 2,
+        insurance_goal: lowerAnalyticsValue(String(value)),
+      });
+    }
+
     if (field === "insuranceGoal" && nextStep === "name" && !trackedAutoZipRef.current) {
       trackedAutoZipRef.current = true;
       // Same auto-skip path as above, but triggered from the goal answer.
-      trackFunnelEvent("ViewContent", {
+      trackFunnelOnce("step_zip", {
         ...getAnalyticsLeadPayload(),
-        event_id: createEventId("viewcontent"),
+        event_id: createEventId("step_zip"),
         step: "zip",
         step_number: 3,
         zip_detected: true,
@@ -1728,6 +1760,7 @@ export default function IulV6Client({ initialPrelandName }: IulV6ClientProps) {
 
     if (zipValidationMessage) {
       setZipError(zipValidationMessage);
+      trackFunnelError("zip", "invalid_zip_length", zipValidationMessage);
       return;
     }
 
@@ -1761,6 +1794,16 @@ export default function IulV6Client({ initialPrelandName }: IulV6ClientProps) {
         state: data.state || prev.state,
       }));
 
+      trackFunnelOnce("step_zip", {
+        ...getAnalyticsLeadPayload(),
+        event_id: createEventId("step_zip"),
+        step: "zip",
+        step_number: 3,
+        zip_code: zipCode,
+        location: lowerAnalyticsValue(data.location || defaultLocationText),
+        state: getAnalyticsState(data.state),
+      });
+
       transitionTo("name", "forward");
     } catch (error) {
       const message =
@@ -1775,6 +1818,7 @@ export default function IulV6Client({ initialPrelandName }: IulV6ClientProps) {
         state: prev.detectedState || "",
       }));
       setZipError(message);
+      trackFunnelError("zip", "zip_lookup_failed", message);
     } finally {
       setIsLookingUpZip(false);
     }
@@ -1809,6 +1853,15 @@ export default function IulV6Client({ initialPrelandName }: IulV6ClientProps) {
       last_name: answers.lastName.trim(),
     });
 
+    trackFunnelOnce("step_name", {
+      ...getAnalyticsLeadPayload(),
+      event_id: createEventId("step_name"),
+      step: "name",
+      step_number: 4,
+      first_name: lowerAnalyticsValue(answers.firstName),
+      last_name: lowerAnalyticsValue(answers.lastName),
+    });
+
     setSubmitError("");
     transitionTo("phone", "forward");
 
@@ -1820,6 +1873,7 @@ export default function IulV6Client({ initialPrelandName }: IulV6ClientProps) {
           ? error.message
           : "No pudimos preparar el envio seguro. Intenta nuevamente.";
       setSubmitError(message);
+      trackFunnelError("name", "lead_token_failed", message);
     }
   }
 
@@ -1834,9 +1888,9 @@ export default function IulV6Client({ initialPrelandName }: IulV6ClientProps) {
     const phoneValidationMessage = getPhoneLengthValidationMessage(normalizedPhone);
     if (phoneValidationMessage) {
       setPhoneError(phoneValidationMessage);
-      trackFunnelEvent("PhoneValidation", {
-        event_id: createEventId("phone_validation"),
-        funnel_id: "iul-v6",
+      trackFunnelEvent("veriphone_failed", {
+        ...getAnalyticsLeadPayload(),
+        event_id: createEventId("veriphone_failed"),
         step: "contact",
         step_number: 5,
         phone_number: normalizedPhone,
@@ -1850,9 +1904,9 @@ export default function IulV6Client({ initialPrelandName }: IulV6ClientProps) {
     if (isPhoneValidating) {
       const validationReason = "Estamos verificando tu numero. Espera un momento.";
       setPhoneError(validationReason);
-      trackFunnelEvent("PhoneValidation", {
-        event_id: createEventId("phone_validation"),
-        funnel_id: "iul-v6",
+      trackFunnelEvent("veriphone_failed", {
+        ...getAnalyticsLeadPayload(),
+        event_id: createEventId("veriphone_failed"),
         step: "contact",
         step_number: 5,
         phone_number: normalizedPhone,
@@ -1866,9 +1920,9 @@ export default function IulV6Client({ initialPrelandName }: IulV6ClientProps) {
     if (!isPhoneVerified) {
       const validationReason = phoneVerificationData?.reason || "Ingresa un numero movil contactable.";
       setPhoneError(validationReason);
-      trackFunnelEvent("PhoneValidation", {
-        event_id: createEventId("phone_validation"),
-        funnel_id: "iul-v6",
+      trackFunnelEvent("veriphone_failed", {
+        ...getAnalyticsLeadPayload(),
+        event_id: createEventId("veriphone_failed"),
         step: "contact",
         step_number: 5,
         phone_number: normalizedPhone,
@@ -1882,7 +1936,9 @@ export default function IulV6Client({ initialPrelandName }: IulV6ClientProps) {
     }
 
     if (!isValidEmail(answers.email)) {
-      setEmailError("Por favor, ingresa un correo válido.");
+      const emailValidationMessage = "Por favor, ingresa un correo valido.";
+      setEmailError(emailValidationMessage);
+      trackFunnelError("contact", "invalid_email", emailValidationMessage);
       return;
     }
 
@@ -1964,7 +2020,9 @@ export default function IulV6Client({ initialPrelandName }: IulV6ClientProps) {
       }
 
       if (!resolvedState || !resolvedZipCode || !resolvedLocationText) {
-        setSubmitError("Necesitamos confirmar tu estado para completar la solicitud.");
+        const locationMessage = "Necesitamos confirmar tu estado para completar la solicitud.";
+        setSubmitError(locationMessage);
+        trackFunnelError("zip", "missing_location", locationMessage);
         transitionTo("state", "backward");
         return;
       }
@@ -1989,7 +2047,9 @@ export default function IulV6Client({ initialPrelandName }: IulV6ClientProps) {
       ].every(Boolean);
 
       if (!hasCompleteLeadData) {
-        setSubmitError("Necesitamos completar tu ubicaciÃ³n para enviar la solicitud.");
+        const missingLeadDataMessage = "Necesitamos completar tu ubicacion para enviar la solicitud.";
+        setSubmitError(missingLeadDataMessage);
+        trackFunnelError("submit", "incomplete_lead_data", missingLeadDataMessage);
         transitionTo("state", "backward");
         return;
       }
@@ -2049,7 +2109,7 @@ export default function IulV6Client({ initialPrelandName }: IulV6ClientProps) {
       } | null;
       const leadId = responseBody?.leadId;
       submittedLeadRef.current = true;
-      const leadEventId = createEventId("lead");
+      const leadEventId = createEventId("lead_generated");
       const nextParams = new URLSearchParams(window.location.search);
       nextParams.set("funnel_id", "iul-v6");
       if (leadId) {
@@ -2076,7 +2136,7 @@ export default function IulV6Client({ initialPrelandName }: IulV6ClientProps) {
         lead_id: leadId || "",
       });
 
-      trackFunnelEvent("Lead", {
+      trackFunnelEvent("lead_generated", {
         ...getAnalyticsLeadPayload(),
         event_id: leadEventId,
         lead_id: leadId,
@@ -2106,6 +2166,7 @@ export default function IulV6Client({ initialPrelandName }: IulV6ClientProps) {
           ? error.message
           : "No pudimos enviar tu solicitud ahora mismo. Intenta nuevamente.";
       setSubmitError(message);
+      trackFunnelError("submit", "lead_submit_failed", message);
     } finally {
       setIsSubmittingLead(false);
     }

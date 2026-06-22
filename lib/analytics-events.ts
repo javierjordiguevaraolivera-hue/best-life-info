@@ -1,5 +1,5 @@
-import posthog from "posthog-js";
 import { trackMetaPixelEvent } from "@/lib/meta-pixel";
+import { initPostHog } from "@/lib/posthog-client";
 
 export type AnalyticsEventPayload = Record<string, string | number | boolean | null | undefined>;
 
@@ -34,6 +34,19 @@ const iulV6StepNumbers: Record<string, number> = {
   submit: 6,
 };
 
+const postHogEventNames = new Set([
+  "preland",
+  "step_age",
+  "step_goal",
+  "step_zip",
+  "step_name",
+  "veriphone_verified",
+  "veriphone_failed",
+  "lead_generated",
+  "call_clicked",
+  "funnel_error",
+]);
+
 let lastPostHogIdentifySignature = "";
 
 export function createEventId(prefix: string) {
@@ -49,25 +62,36 @@ function normalizeIulV6Step(value: unknown) {
   return iulV6StepAliases[step] || step || undefined;
 }
 
-function getPostHogEventName(event: string) {
-  if (event === "Lead") return "funnel_submitted";
-  if (event === "Contact") return "funnel_contact_clicked";
-  if (event === "PhoneValidation") return "phone_validation_completed";
-  return "funnel_step_viewed";
+function getPostHogEventName(event: string, step?: string) {
+  if (postHogEventNames.has(event)) return event;
+  if (event === "Lead") return "lead_generated";
+  if (event === "Contact") return "call_clicked";
+  if (event === "PhoneValidation") return "veriphone_verified";
+  if (step && postHogEventNames.has(`step_${step}`)) return `step_${step}`;
+  return event;
 }
 
 function getPostHogStep(event: string, payload: AnalyticsEventPayload) {
-  if (event === "Lead") return "submit";
-  if (event === "Contact" || event === "PhoneValidation") return "contact";
+  if (event === "lead_generated" || event === "Lead") return "submit";
+  if (
+    event === "call_clicked" ||
+    event === "Contact" ||
+    event === "veriphone_verified" ||
+    event === "veriphone_failed" ||
+    event === "PhoneValidation"
+  ) {
+    return "contact";
+  }
+  if (event.startsWith("step_")) return normalizeIulV6Step(event.replace(/^step_/, ""));
   return normalizeIulV6Step(payload.step);
 }
 
-function trackMetaFunnelEvent(event: string, payload: AnalyticsEventPayload, step?: string) {
+function trackMetaFunnelEvent(event: string, payload: AnalyticsEventPayload) {
   // Meta Pixel is intentionally narrower than PostHog:
-  // - PageView fires only when the user reaches the age step.
+  // - PageView fires when the user passes the age step.
   // - Lead fires only after Supabase accepts the lead.
   // Keep all Meta calls here so components never call `fbq` directly.
-  if (event === "PageView" && step === "age") {
+  if (event === "step_age" || event === "PageView") {
     trackMetaPixelEvent("PageView", {
       ...payload,
       funnel_id: "iul-v6",
@@ -77,7 +101,7 @@ function trackMetaFunnelEvent(event: string, payload: AnalyticsEventPayload, ste
     return;
   }
 
-  if (event === "Lead") {
+  if (event === "lead_generated" || event === "Lead") {
     trackMetaPixelEvent("Lead", {
       ...payload,
       funnel_id: "iul-v6",
@@ -93,25 +117,27 @@ export function trackFunnelEvent(event: string, payload: AnalyticsEventPayload =
   const funnelId = typeof payload.funnel_id === "string" ? payload.funnel_id : "";
   if (funnelId !== "iul-v6") return;
 
+  const posthog = initPostHog();
   const step = getPostHogStep(event, payload);
   const stepNumber = step ? iulV6StepNumbers[step] : undefined;
 
   // This wrapper is the only place that translates internal funnel events into
   // vendor events. Keep PostHog and Meta here to avoid duplicated provider calls.
-  posthog.capture(getPostHogEventName(event), {
+  posthog.capture(getPostHogEventName(event, step), {
     ...payload,
     funnel_id: "iul-v6",
     step,
     step_number: stepNumber ?? payload.step_number,
   });
 
-  trackMetaFunnelEvent(event, payload, step);
+  trackMetaFunnelEvent(event, payload);
 }
 
 export function identifyFunnelPerson(payload: IdentifyFunnelPersonPayload) {
   if (typeof window === "undefined") return;
   if (payload.funnel_id !== "iul-v6") return;
 
+  const posthog = initPostHog();
   // Keep PostHog's own anonymous Distinct ID instead of replacing it with our
   // app device ID. `identify` attaches person properties to the same visitor.
   const distinctId = posthog.get_distinct_id();

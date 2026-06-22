@@ -193,7 +193,7 @@ export default function PopUp1({
       ...getUtmParams(),
     };
 
-    trackFunnelEvent("Contact", eventPayload);
+    trackFunnelEvent("call_clicked", eventPayload);
   }
 
   function handleContinueClick() {
