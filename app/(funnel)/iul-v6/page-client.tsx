@@ -418,6 +418,11 @@ function isValidEmail(value: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
 }
 
+function normalizeEmailInput(value: string) {
+  // Keep email clean even when the browser autofills a saved value with spaces.
+  return value.toLowerCase().replace(/\s+/g, "");
+}
+
 function normalizeZipCode(value: string) {
   return value.replace(/\D/g, "").slice(0, 5);
 }
@@ -2998,11 +3003,29 @@ export default function IulV6Client({
                   name="email"
                   value={answers.email}
                   onChange={(event) => {
+                    const nextEmail = normalizeEmailInput(event.target.value);
                     setAnswers((prev) => ({
                       ...prev,
-                      email: event.target.value,
+                      email: nextEmail,
                     }));
                     setEmailError("");
+                  }}
+                  onInput={(event) => {
+                    const nextEmail = normalizeEmailInput(event.currentTarget.value);
+                    if (nextEmail !== answers.email) {
+                      setAnswers((prev) => ({
+                        ...prev,
+                        email: nextEmail,
+                      }));
+                    }
+                    setEmailError("");
+                  }}
+                  onBlur={(event) => {
+                    const nextEmail = normalizeEmailInput(event.currentTarget.value);
+                    setAnswers((prev) => ({
+                      ...prev,
+                      email: nextEmail,
+                    }));
                   }}
                   placeholder="Ej: correo@ejemplo.com"
                   inputMode="email"
@@ -3070,11 +3093,29 @@ export default function IulV6Client({
                 <input
                   value={answers.email}
                   onChange={(event) => {
+                    const nextEmail = normalizeEmailInput(event.target.value);
                     setAnswers((prev) => ({
                       ...prev,
-                      email: event.target.value,
+                      email: nextEmail,
                     }));
                     setEmailError("");
+                  }}
+                  onInput={(event) => {
+                    const nextEmail = normalizeEmailInput(event.currentTarget.value);
+                    if (nextEmail !== answers.email) {
+                      setAnswers((prev) => ({
+                        ...prev,
+                        email: nextEmail,
+                      }));
+                    }
+                    setEmailError("");
+                  }}
+                  onBlur={(event) => {
+                    const nextEmail = normalizeEmailInput(event.currentTarget.value);
+                    setAnswers((prev) => ({
+                      ...prev,
+                      email: nextEmail,
+                    }));
                   }}
                   placeholder="Ej: correo@ejemplo.com"
                   inputMode="email"
