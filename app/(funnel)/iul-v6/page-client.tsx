@@ -209,7 +209,9 @@ type TrafficAttribution = {
 };
 
 type EverflowSdk = {
+  configure?: (options: { tracking_domain?: string; tld?: string }) => void;
   click: (payload: Record<string, string | undefined>) => unknown;
+  getTransactionId?: (offerId: string | number) => string | undefined;
   urlParameter?: (name: string) => string | undefined;
 };
 
@@ -253,7 +255,7 @@ const ageRejectedCookieName = "bf_age_rejected_iul_v6";
 const ageRejectedCookieDurationDays = 90;
 const ageRejectedHash = "#no-califica";
 const blockedStateName = "New York";
-const everflowSdkScriptUrl = "https://www.jk8gcxs.com/scripts/main.js";
+const everflowTrackingDomain = "https://www.jk8gcxs.com";
 const everflowDirectLinkOfferId = "3765";
 const everflowTransactionStorageKey = "best-life-everflow-transaction-id";
 const everflowTransactionWatchMs = 20000;
@@ -1000,39 +1002,17 @@ function loadEverflowSdk() {
     return Promise.reject(new Error("Everflow SDK can only load in the browser"));
   }
 
-  const existingSdk = (window as Window & { EF?: EverflowSdk }).EF;
-  if (existingSdk?.click) return Promise.resolve(existingSdk);
   if (everflowSdkPromise) return everflowSdkPromise;
 
-  everflowSdkPromise = new Promise((resolve, reject) => {
-    const existingScript = document.querySelector<HTMLScriptElement>(
-      `script[src="${everflowSdkScriptUrl}"]`,
-    );
-
-    const finishWhenReady = () => {
-      const sdk = (window as Window & { EF?: EverflowSdk }).EF;
-      if (sdk?.click) {
-        resolve(sdk);
-        return;
-      }
-      reject(new Error("Everflow SDK loaded without EF.click"));
-    };
-
-    if (existingScript) {
-      existingScript.addEventListener("load", finishWhenReady, { once: true });
-      existingScript.addEventListener("error", () => reject(new Error("Everflow SDK failed to load")), {
-        once: true,
-      });
-      return;
+  everflowSdkPromise = import("@everflow/everflow-sdk").then((module) => {
+    const sdk = module.default as EverflowSdk;
+    if (!sdk?.click) {
+      throw new Error("Everflow SDK loaded without click()");
     }
 
-    const script = document.createElement("script");
-    script.type = "text/javascript";
-    script.src = everflowSdkScriptUrl;
-    script.async = true;
-    script.onload = finishWhenReady;
-    script.onerror = () => reject(new Error("Everflow SDK failed to load"));
-    document.head.appendChild(script);
+    // The npm SDK requires the tracking domain to be configured before click().
+    sdk.configure?.({ tracking_domain: everflowTrackingDomain });
+    return sdk;
   });
 
   return everflowSdkPromise;
@@ -1057,6 +1037,7 @@ async function requestEverflowDirectLinkTransaction(searchParams: URLSearchParam
   const clickResult = await Promise.resolve(sdk.click(payload));
   const transactionId =
     getNestedTransactionId(clickResult) ||
+    sdk.getTransactionId?.(everflowDirectLinkOfferId)?.trim() ||
     readEverflowTransactionIdFromBrowser();
 
   if (transactionId) storeEverflowTransactionId(transactionId);

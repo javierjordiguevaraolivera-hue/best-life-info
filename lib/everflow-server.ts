@@ -50,18 +50,21 @@ export async function requestEverflowServerClick(
 
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), everflowServerTimeoutMs);
-  const clickUrl = new URL("/sdk/click", everflowTrackingDomain);
+  const clickUrl = new URL("/clk", everflowTrackingDomain);
   const clickParams = clickUrl.searchParams;
 
-  // Server-side fallback for Everflow Direct Linking. The browser SDK still runs
-  // as backup, but this creates a TID as soon as /iul-v6 is requested.
-  clickParams.set("_ef_transaction_id", getSearchParam(searchParams, "_ef_transaction_id"));
+  // Server-side Everflow Direct Linking. Everflow documents `/clk` as the
+  // backend endpoint that records a click and returns a transaction_id.
   clickParams.set("oid", getSearchParam(searchParams, "oid") || everflowDirectLinkOfferId);
   clickParams.set("affid", getSearchParam(searchParams, "affid"));
-  clickParams.set("__cc", getSearchParam(searchParams, "__cc"));
-  clickParams.set("async", "json");
-  clickParams.set("__qp", getQueryKeys(searchParams).join("|"));
-  clickParams.set("__rf", context.referrer || "");
+  appendIfPresent(clickParams, searchParams, "_ef_transaction_id");
+  appendIfPresent(clickParams, searchParams, "__cc");
+  if (getQueryKeys(searchParams).length) {
+    clickParams.set("__qp", getQueryKeys(searchParams).join("|"));
+  }
+  if (context.referrer) {
+    clickParams.set("__rf", context.referrer);
+  }
 
   [
     "uid",
