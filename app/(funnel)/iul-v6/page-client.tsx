@@ -256,6 +256,7 @@ const blockedStateName = "New York";
 const everflowSdkScriptUrl = "https://www.jk8gcxs.com/scripts/main.js";
 const everflowDirectLinkOfferId = "3765";
 const everflowTransactionStorageKey = "best-life-everflow-transaction-id";
+const everflowTransactionWatchMs = 20000;
 let everflowSdkPromise: Promise<EverflowSdk> | null = null;
 
 const thankYouHighlights = [
@@ -917,23 +918,38 @@ function extractEverflowTransactionId(value: string) {
   }
 }
 
-function readEverflowTransactionIdFromBrowser() {
+function readEverflowTransactionIdFromBrowserDetailed() {
   if (typeof window === "undefined") return null;
 
   const urlTransactionId = getTrimmedParam(new URLSearchParams(window.location.search), "_ef_transaction_id");
-  if (urlTransactionId) return urlTransactionId;
+  if (urlTransactionId) {
+    return {
+      transactionId: urlTransactionId,
+      source: "url",
+      key: "_ef_transaction_id",
+    };
+  }
 
   try {
-    const storageCandidates = [window.localStorage, window.sessionStorage];
+    const storageCandidates = [
+      { source: "localStorage", storage: window.localStorage },
+      { source: "sessionStorage", storage: window.sessionStorage },
+    ];
 
-    for (const storage of storageCandidates) {
+    for (const { source, storage } of storageCandidates) {
       for (let index = 0; index < storage.length; index += 1) {
         const key = storage.key(index) || "";
         const value = storage.getItem(key) || "";
 
         if (/ef|everflow|transaction/i.test(key) && value.trim()) {
           const transactionId = extractEverflowTransactionId(value);
-          if (transactionId) return transactionId;
+          if (transactionId) {
+            return {
+              transactionId,
+              source,
+              key,
+            };
+          }
         }
       }
     }
@@ -952,9 +968,15 @@ function readEverflowTransactionIdFromBrowser() {
       const key = separatorIndex >= 0 ? cookie.slice(0, separatorIndex) : cookie;
       const value = separatorIndex >= 0 ? cookie.slice(separatorIndex + 1) : "";
 
-      if (/ef|everflow|transaction|tid/i.test(key) && value.trim()) {
+      if (/ef|everflow|transaction/i.test(key) && value.trim()) {
         const transactionId = extractEverflowTransactionId(value);
-        if (transactionId) return transactionId;
+        if (transactionId) {
+          return {
+            transactionId,
+            source: "cookie",
+            key,
+          };
+        }
       }
     }
   } catch {
@@ -962,6 +984,10 @@ function readEverflowTransactionIdFromBrowser() {
   }
 
   return null;
+}
+
+function readEverflowTransactionIdFromBrowser() {
+  return readEverflowTransactionIdFromBrowserDetailed()?.transactionId || null;
 }
 
 function loadEverflowSdk() {
@@ -1082,9 +1108,13 @@ function resolveTrafficAttribution(
 
 type IulV6ClientProps = {
   initialPrelandName?: string | null;
+  initialEverflowTransactionId?: string | null;
 };
 
-export default function IulV6Client({ initialPrelandName }: IulV6ClientProps) {
+export default function IulV6Client({
+  initialPrelandName,
+  initialEverflowTransactionId,
+}: IulV6ClientProps) {
   const [activePrelandName, setActivePrelandName] = useState<string | null>(() =>
     getPrelandComponent(initialPrelandName) ? initialPrelandName?.trim() || null : null,
   );
@@ -1222,25 +1252,100 @@ export default function IulV6Client({ initialPrelandName }: IulV6ClientProps) {
     });
   }
 
+  function trackEverflowDebug(stage: string, payload: AnalyticsEventPayload = {}) {
+    const searchParams = new URLSearchParams(window.location.search);
+    const browserTransaction = readEverflowTransactionIdFromBrowserDetailed();
+
+    trackFunnelEvent("everflow_debug", {
+      ...getAnalyticsLeadPayload(),
+      event_id: createEventId("everflow_debug"),
+      step: currentStep === "phone" ? "contact" : currentStep,
+      everflow_stage: stage,
+      oid: getTrimmedParam(searchParams, "oid") || undefined,
+      affid: getTrimmedParam(searchParams, "affid") || undefined,
+      source_id: getTrimmedParam(searchParams, "source_id") || undefined,
+      url_sub1: getTrimmedParam(searchParams, "sub1") || undefined,
+      url_sub2: getTrimmedParam(searchParams, "sub2") || undefined,
+      preland_name: activePrelandName || undefined,
+      has_stored_transaction_id: Boolean(getStoredEverflowTransactionId()),
+      has_browser_transaction_id: Boolean(browserTransaction?.transactionId),
+      browser_transaction_source: browserTransaction?.source || undefined,
+      browser_transaction_key: browserTransaction?.key || undefined,
+      everflow_transaction_id: browserTransaction?.transactionId || undefined,
+      ...payload,
+    });
+  }
+
+  function storeEverflowBrowserTransactionIfReady(stage: string) {
+    const browserTransaction = readEverflowTransactionIdFromBrowserDetailed();
+
+    if (!browserTransaction?.transactionId) {
+      trackEverflowDebug(stage, {
+        everflow_transaction_found: false,
+      });
+      return false;
+    }
+
+    storeEverflowTransactionId(browserTransaction.transactionId);
+    trackEverflowDebug(stage, {
+      everflow_transaction_found: true,
+      everflow_transaction_id: browserTransaction.transactionId,
+      browser_transaction_source: browserTransaction.source,
+      browser_transaction_key: browserTransaction.key,
+    });
+    return true;
+  }
+
   useEffect(() => {
     leadUrlRef.current = window.location.href;
   }, []);
 
   useEffect(() => {
-    if (currentStep !== "age" || everflowClickRequestedRef.current) return;
+    if (!initialEverflowTransactionId) return;
+
+    storeEverflowTransactionId(initialEverflowTransactionId);
+    trackEverflowDebug("server_click_hydrated", {
+      everflow_transaction_found: true,
+      everflow_transaction_id: initialEverflowTransactionId,
+    });
+  }, [initialEverflowTransactionId]);
+
+  useEffect(() => {
+    if (everflowClickRequestedRef.current) return;
 
     const searchParams = new URLSearchParams(window.location.search);
     if (!isEverflowDirectLink(searchParams)) return;
 
+    if (getStoredEverflowTransactionId()) {
+      trackEverflowDebug("browser_click_skipped_server_tid", {
+        everflow_transaction_found: true,
+        everflow_transaction_id: getStoredEverflowTransactionId() || undefined,
+      });
+      return;
+    }
+
     everflowClickRequestedRef.current = true;
+    trackEverflowDebug("early_direct_link_detected", {
+      everflow_transaction_found: Boolean(readEverflowTransactionIdFromBrowser()),
+    });
 
     everflowTransactionPromiseRef.current = requestEverflowDirectLinkTransaction(searchParams);
 
-    void everflowTransactionPromiseRef.current.catch((error) => {
-      // Attribution is best-effort; a failed SDK request should not block the lead.
-      console.error("Everflow direct-link click failed", error);
-    });
-  }, [currentStep]);
+    void everflowTransactionPromiseRef.current
+      .then((transactionId) => {
+        trackEverflowDebug("early_click_resolved", {
+          everflow_transaction_found: Boolean(transactionId),
+          everflow_transaction_id: transactionId || undefined,
+        });
+      })
+      .catch((error) => {
+        // Attribution is best-effort; a failed SDK request should not block the lead.
+        console.error("Everflow direct-link click failed", error);
+        trackEverflowDebug("early_click_failed", {
+          everflow_error: error instanceof Error ? error.message : String(error),
+        });
+      });
+  }, [activePrelandName, currentStep]);
 
   useEffect(() => {
     if (currentStep !== "phone") return;
@@ -1248,19 +1353,53 @@ export default function IulV6Client({ initialPrelandName }: IulV6ClientProps) {
     const searchParams = new URLSearchParams(window.location.search);
     if (!isEverflowDirectLink(searchParams) || getStoredEverflowTransactionId()) return;
 
-    const browserTransactionId = readEverflowTransactionIdFromBrowser();
-    if (browserTransactionId) {
-      storeEverflowTransactionId(browserTransactionId);
+    if (!everflowTransactionPromiseRef.current) {
+      trackEverflowDebug("contact_retry_click_started", {
+        everflow_transaction_found: Boolean(readEverflowTransactionIdFromBrowser()),
+      });
+      everflowTransactionPromiseRef.current = requestEverflowDirectLinkTransaction(searchParams);
+    }
+
+    if (storeEverflowBrowserTransactionIfReady("contact_initial_read")) {
       return;
     }
 
-    // Contact is the last user-input step. If the age-step click request finishes
+    // Contact is the last user-input step. If the direct-link click request finishes
     // while the user is typing phone/email, store the TID before submit without
     // ever delaying the user.
-    void everflowTransactionPromiseRef.current?.then((transactionId) => {
-      if (transactionId) storeEverflowTransactionId(transactionId);
-    });
-  }, [currentStep]);
+    void everflowTransactionPromiseRef.current
+      ?.then((transactionId) => {
+        if (!transactionId) return;
+
+        storeEverflowTransactionId(transactionId);
+        trackEverflowDebug("contact_click_promise_resolved", {
+          everflow_transaction_found: true,
+          everflow_transaction_id: transactionId,
+        });
+      })
+      .catch((error) => {
+        trackEverflowDebug("contact_click_failed", {
+          everflow_error: error instanceof Error ? error.message : String(error),
+        });
+      });
+
+    const startedAt = Date.now();
+    const intervalId = window.setInterval(() => {
+      const didStoreTransaction = storeEverflowBrowserTransactionIfReady("contact_watch_read");
+      if (didStoreTransaction || Date.now() - startedAt >= everflowTransactionWatchMs) {
+        if (!didStoreTransaction) {
+          trackEverflowDebug("contact_watch_expired", {
+            everflow_transaction_found: false,
+          });
+        }
+        window.clearInterval(intervalId);
+      }
+    }, 1000);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [activePrelandName, currentStep]);
 
   useEffect(() => {
     if (!isPrelandActive || trackedStepsRef.current.has("preland")) return;
@@ -2128,6 +2267,15 @@ export default function IulV6Client({ initialPrelandName }: IulV6ClientProps) {
       // already found a TID, resolveTrafficAttribution will pick it up; otherwise
       // the lead is saved immediately with sub2 null.
       const trafficAttribution = resolveTrafficAttribution(urlParams);
+      if (isEverflowDirectLink(urlParams)) {
+        trackEverflowDebug("submit_attribution_resolved", {
+          everflow_transaction_found: Boolean(trafficAttribution.sub2),
+          everflow_transaction_id: trafficAttribution.sub2 || undefined,
+          resolved_source: trafficAttribution.source,
+          resolved_sub1: trafficAttribution.sub1 || undefined,
+          resolved_sub2: trafficAttribution.sub2 || undefined,
+        });
+      }
       const cleanedAnswers = Object.fromEntries(
         Object.entries({
           ageGroup: completedAnswers.ageGroup,

@@ -42,6 +42,7 @@ const postHogEventNames = new Set([
   "step_name",
   "veriphone_verified",
   "veriphone_failed",
+  "everflow_debug",
   "lead_generated",
   "call_clicked",
   "funnel_error",
