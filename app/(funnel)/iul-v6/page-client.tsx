@@ -897,6 +897,26 @@ function getNestedTransactionId(value: unknown): string | null {
   return getNestedTransactionId(record.data) || getNestedTransactionId(record.response);
 }
 
+function extractEverflowTransactionId(value: string) {
+  const trimmedValue = value.trim();
+  if (!trimmedValue) return null;
+
+  try {
+    const decodedValue = decodeURIComponent(trimmedValue);
+    if (decodedValue !== trimmedValue) {
+      return extractEverflowTransactionId(decodedValue);
+    }
+  } catch {
+    // Keep the raw value if it is not URI encoded.
+  }
+
+  try {
+    return getNestedTransactionId(JSON.parse(trimmedValue));
+  } catch {
+    return trimmedValue;
+  }
+}
+
 function readEverflowTransactionIdFromBrowser() {
   if (typeof window === "undefined") return null;
 
@@ -912,12 +932,33 @@ function readEverflowTransactionIdFromBrowser() {
         const value = storage.getItem(key) || "";
 
         if (/ef|everflow|transaction/i.test(key) && value.trim()) {
-          return value.trim();
+          const transactionId = extractEverflowTransactionId(value);
+          if (transactionId) return transactionId;
         }
       }
     }
   } catch {
     // Some privacy modes block storage enumeration; EF.click return is still preferred.
+  }
+
+  try {
+    const cookiePairs = document.cookie
+      .split(";")
+      .map((cookie) => cookie.trim())
+      .filter(Boolean);
+
+    for (const cookie of cookiePairs) {
+      const separatorIndex = cookie.indexOf("=");
+      const key = separatorIndex >= 0 ? cookie.slice(0, separatorIndex) : cookie;
+      const value = separatorIndex >= 0 ? cookie.slice(separatorIndex + 1) : "";
+
+      if (/ef|everflow|transaction|tid/i.test(key) && value.trim()) {
+        const transactionId = extractEverflowTransactionId(value);
+        if (transactionId) return transactionId;
+      }
+    }
+  } catch {
+    // Cookie access can be blocked; submitting without TID is safer than blocking the lead.
   }
 
   return null;
@@ -991,13 +1032,19 @@ async function requestEverflowDirectLinkTransaction(searchParams: URLSearchParam
   return transactionId;
 }
 
-function resolveTrafficAttribution(searchParams: URLSearchParams): TrafficAttribution {
+function resolveTrafficAttribution(
+  searchParams: URLSearchParams,
+  everflowTransactionIdOverride?: string | null,
+): TrafficAttribution {
   const uniqueParamNames = Array.from(new Set(searchParams.keys()));
   const sub1 = getTrimmedParam(searchParams, "sub1");
   const sub2 = getTrimmedParam(searchParams, "sub2");
   const affid = getTrimmedParam(searchParams, "affid");
   const adaccountName = getTrimmedParam(searchParams, "adaccount_name") || null;
-  const everflowTransactionId = getStoredEverflowTransactionId();
+  const everflowTransactionId =
+    everflowTransactionIdOverride ||
+    getStoredEverflowTransactionId() ||
+    readEverflowTransactionIdFromBrowser();
   const isStrictEverflowRedirect =
     uniqueParamNames.length === 2 &&
     uniqueParamNames.every((name) => name === "sub1" || name === "sub2") &&
@@ -1192,6 +1239,26 @@ export default function IulV6Client({ initialPrelandName }: IulV6ClientProps) {
     void everflowTransactionPromiseRef.current.catch((error) => {
       // Attribution is best-effort; a failed SDK request should not block the lead.
       console.error("Everflow direct-link click failed", error);
+    });
+  }, [currentStep]);
+
+  useEffect(() => {
+    if (currentStep !== "phone") return;
+
+    const searchParams = new URLSearchParams(window.location.search);
+    if (!isEverflowDirectLink(searchParams) || getStoredEverflowTransactionId()) return;
+
+    const browserTransactionId = readEverflowTransactionIdFromBrowser();
+    if (browserTransactionId) {
+      storeEverflowTransactionId(browserTransactionId);
+      return;
+    }
+
+    // Contact is the last user-input step. If the age-step click request finishes
+    // while the user is typing phone/email, store the TID before submit without
+    // ever delaying the user.
+    void everflowTransactionPromiseRef.current?.then((transactionId) => {
+      if (transactionId) storeEverflowTransactionId(transactionId);
     });
   }, [currentStep]);
 
@@ -2057,8 +2124,9 @@ export default function IulV6Client({ initialPrelandName }: IulV6ClientProps) {
       setAnswers(completedAnswers);
 
       const urlParams = new URLSearchParams(window.location.search);
-      // Do not wait for Everflow during submit. The click request starts on the age
-      // step and keeps resolving in the background while the user advances.
+      // Submit never waits for Everflow. If the age/contact background collection
+      // already found a TID, resolveTrafficAttribution will pick it up; otherwise
+      // the lead is saved immediately with sub2 null.
       const trafficAttribution = resolveTrafficAttribution(urlParams);
       const cleanedAnswers = Object.fromEntries(
         Object.entries({
