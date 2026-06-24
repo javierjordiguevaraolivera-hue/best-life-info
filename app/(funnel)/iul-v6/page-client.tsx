@@ -2411,7 +2411,7 @@ export default function IulV6Client({
             Gracias por tu interes
           </h1>
           <p className="mx-auto mt-4 max-w-[560px] text-[17px] leading-[1.55] text-[#5d6674] md:text-[19px]">
-            Actualmente este beneficio no esta disponible para tu grupo de edad.
+            Actualmente podrias no calificar para estos beneficios.
             Si en el futuro abrimos nuevas opciones, nos encantara ayudarte a revisarlas.
           </p>
         </div>
