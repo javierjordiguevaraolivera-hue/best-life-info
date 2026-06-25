@@ -13,6 +13,27 @@ import {
   trackFunnelEvent,
   type AnalyticsEventPayload,
 } from "@/lib/analytics-events";
+import {
+  buildEverflowBrowserSignature,
+  getFinalEverflowSource,
+  getTrimmedParam,
+  isEverflowDirectLink,
+  resolveTrafficAttribution,
+} from "@/lib/everflow/attribution";
+import {
+  everflowTransactionWatchMs,
+} from "@/lib/everflow/config";
+import {
+  getReusableEverflowTransaction,
+  requestEverflowClientClick,
+  storeEverflowTransaction,
+} from "@/lib/everflow/client";
+import type {
+  EverflowClientClickResult,
+  EverflowDiagnostics,
+  EverflowServerClickResult,
+  TrafficAttribution,
+} from "@/lib/everflow/types";
 import { inferUsZipFromStateAndPhone } from "@/lib/infer-us-zip";
 
 const questionnaireSecuritySeals = [
@@ -199,22 +220,6 @@ type RuntimeConfig = {
   ringbaCampaignId: string;
 };
 
-type TrafficSource = "network" | "internal";
-
-type TrafficAttribution = {
-  source: TrafficSource;
-  sub1: string | null;
-  sub2: string | null;
-  adaccountName: string | null;
-};
-
-type EverflowSdk = {
-  configure?: (options: { tracking_domain?: string; tld?: string }) => void;
-  click: (payload: Record<string, string | undefined>) => unknown;
-  getTransactionId?: (offerId: string | number) => string | undefined;
-  urlParameter?: (name: string) => string | undefined;
-};
-
 const stepOrder: FunnelStep[] = [
   "intro",
   "age",
@@ -255,11 +260,6 @@ const ageRejectedCookieName = "bf_age_rejected_iul_v6";
 const ageRejectedCookieDurationDays = 90;
 const ageRejectedHash = "#no-califica";
 const blockedStateName = "New York";
-const everflowTrackingDomain = "https://www.jk8gcxs.com";
-const everflowDirectLinkOfferId = "3765";
-const everflowTransactionStorageKey = "best-life-everflow-transaction-id";
-const everflowTransactionWatchMs = 20000;
-let everflowSdkPromise: Promise<EverflowSdk> | null = null;
 
 const thankYouHighlights = [
   {
@@ -853,253 +853,14 @@ function getAnalyticsState(value?: string | null) {
   return stateAbbreviations[state] || lowerAnalyticsValue(state);
 }
 
-function getTrimmedParam(searchParams: URLSearchParams, name: string) {
-  return searchParams.get(name)?.trim() || "";
-}
-
-function isEverflowDirectLink(searchParams: URLSearchParams) {
-  return !!getTrimmedParam(searchParams, "oid") && !!getTrimmedParam(searchParams, "affid");
-}
-
-function getStoredEverflowTransactionId() {
-  if (typeof window === "undefined") return null;
-
-  try {
-    return (
-      window.sessionStorage.getItem(everflowTransactionStorageKey) ||
-      window.localStorage.getItem(everflowTransactionStorageKey)
-    );
-  } catch {
-    return null;
-  }
-}
-
-function storeEverflowTransactionId(transactionId: string) {
-  if (typeof window === "undefined" || !transactionId) return;
-
-  try {
-    window.sessionStorage.setItem(everflowTransactionStorageKey, transactionId);
-    window.localStorage.setItem(everflowTransactionStorageKey, transactionId);
-  } catch {
-    // The lead can still submit; storage only keeps the TID available until submit.
-  }
-}
-
-function getNestedTransactionId(value: unknown): string | null {
-  if (!value) return null;
-  if (typeof value === "string") return value.trim() || null;
-  if (typeof value !== "object") return null;
-
-  const record = value as Record<string, unknown>;
-  const directValue =
-    record.transaction_id ||
-    record.transactionId ||
-    record.transactionIdValue ||
-    record.tid ||
-    record.id;
-
-  if (typeof directValue === "string" && directValue.trim()) {
-    return directValue.trim();
-  }
-
-  return getNestedTransactionId(record.data) || getNestedTransactionId(record.response);
-}
-
-function extractEverflowTransactionId(value: string) {
-  const trimmedValue = value.trim();
-  if (!trimmedValue) return null;
-
-  try {
-    const decodedValue = decodeURIComponent(trimmedValue);
-    if (decodedValue !== trimmedValue) {
-      return extractEverflowTransactionId(decodedValue);
-    }
-  } catch {
-    // Keep the raw value if it is not URI encoded.
-  }
-
-  try {
-    return getNestedTransactionId(JSON.parse(trimmedValue));
-  } catch {
-    return trimmedValue;
-  }
-}
-
-function readEverflowTransactionIdFromBrowserDetailed() {
-  if (typeof window === "undefined") return null;
-
-  const urlTransactionId = getTrimmedParam(new URLSearchParams(window.location.search), "_ef_transaction_id");
-  if (urlTransactionId) {
-    return {
-      transactionId: urlTransactionId,
-      source: "url",
-      key: "_ef_transaction_id",
-    };
-  }
-
-  try {
-    const storageCandidates = [
-      { source: "localStorage", storage: window.localStorage },
-      { source: "sessionStorage", storage: window.sessionStorage },
-    ];
-
-    for (const { source, storage } of storageCandidates) {
-      for (let index = 0; index < storage.length; index += 1) {
-        const key = storage.key(index) || "";
-        const value = storage.getItem(key) || "";
-
-        if (/ef|everflow|transaction/i.test(key) && value.trim()) {
-          const transactionId = extractEverflowTransactionId(value);
-          if (transactionId) {
-            return {
-              transactionId,
-              source,
-              key,
-            };
-          }
-        }
-      }
-    }
-  } catch {
-    // Some privacy modes block storage enumeration; EF.click return is still preferred.
-  }
-
-  try {
-    const cookiePairs = document.cookie
-      .split(";")
-      .map((cookie) => cookie.trim())
-      .filter(Boolean);
-
-    for (const cookie of cookiePairs) {
-      const separatorIndex = cookie.indexOf("=");
-      const key = separatorIndex >= 0 ? cookie.slice(0, separatorIndex) : cookie;
-      const value = separatorIndex >= 0 ? cookie.slice(separatorIndex + 1) : "";
-
-      if (/ef|everflow|transaction/i.test(key) && value.trim()) {
-        const transactionId = extractEverflowTransactionId(value);
-        if (transactionId) {
-          return {
-            transactionId,
-            source: "cookie",
-            key,
-          };
-        }
-      }
-    }
-  } catch {
-    // Cookie access can be blocked; submitting without TID is safer than blocking the lead.
-  }
-
-  return null;
-}
-
-function readEverflowTransactionIdFromBrowser() {
-  return readEverflowTransactionIdFromBrowserDetailed()?.transactionId || null;
-}
-
-function loadEverflowSdk() {
-  if (typeof window === "undefined") {
-    return Promise.reject(new Error("Everflow SDK can only load in the browser"));
-  }
-
-  if (everflowSdkPromise) return everflowSdkPromise;
-
-  everflowSdkPromise = import("@everflow/everflow-sdk").then((module) => {
-    const sdk = module.default as EverflowSdk;
-    if (!sdk?.click) {
-      throw new Error("Everflow SDK loaded without click()");
-    }
-
-    // The npm SDK requires the tracking domain to be configured before click().
-    sdk.configure?.({ tracking_domain: everflowTrackingDomain });
-    return sdk;
-  });
-
-  return everflowSdkPromise;
-}
-
-async function requestEverflowDirectLinkTransaction(searchParams: URLSearchParams) {
-  const sdk = await loadEverflowSdk();
-  const payload = {
-    offer_id: everflowDirectLinkOfferId,
-    affiliate_id: getTrimmedParam(searchParams, "affid"),
-    source_id: getTrimmedParam(searchParams, "source_id") || undefined,
-    sub1: getTrimmedParam(searchParams, "sub1") || undefined,
-    sub2: getTrimmedParam(searchParams, "sub2") || undefined,
-    sub3: getTrimmedParam(searchParams, "sub3") || undefined,
-    sub4: getTrimmedParam(searchParams, "sub4") || undefined,
-    sub5: getTrimmedParam(searchParams, "sub5") || undefined,
-    uid: getTrimmedParam(searchParams, "uid") || undefined,
-    transaction_id: getTrimmedParam(searchParams, "_ef_transaction_id") || undefined,
-  };
-
-  // Direct Linking only needs the click/TID. Conversion firing stays server-side/later.
-  const clickResult = await Promise.resolve(sdk.click(payload));
-  const transactionId =
-    getNestedTransactionId(clickResult) ||
-    sdk.getTransactionId?.(everflowDirectLinkOfferId)?.trim() ||
-    readEverflowTransactionIdFromBrowser();
-
-  if (transactionId) storeEverflowTransactionId(transactionId);
-  return transactionId;
-}
-
-function resolveTrafficAttribution(
-  searchParams: URLSearchParams,
-  everflowTransactionIdOverride?: string | null,
-): TrafficAttribution {
-  const uniqueParamNames = Array.from(new Set(searchParams.keys()));
-  const sub1 = getTrimmedParam(searchParams, "sub1");
-  const sub2 = getTrimmedParam(searchParams, "sub2");
-  const affid = getTrimmedParam(searchParams, "affid");
-  const adaccountName = getTrimmedParam(searchParams, "adaccount_name") || null;
-  const everflowTransactionId =
-    everflowTransactionIdOverride ||
-    getStoredEverflowTransactionId() ||
-    readEverflowTransactionIdFromBrowser();
-  const isStrictEverflowRedirect =
-    uniqueParamNames.length === 2 &&
-    uniqueParamNames.every((name) => name === "sub1" || name === "sub2") &&
-    !!sub1 &&
-    !!sub2;
-
-  // Redirect tracking arrives with only sub1/sub2, so those values are already final.
-  if (isStrictEverflowRedirect) {
-    return {
-      source: "network",
-      sub1,
-      sub2,
-      adaccountName: null,
-    };
-  }
-
-  // Direct Linking arrives with oid/affid. We store affid as sub1 and the SDK TID as sub2.
-  if (isEverflowDirectLink(searchParams)) {
-    return {
-      source: "network",
-      sub1: affid,
-      sub2: everflowTransactionId,
-      adaccountName,
-    };
-  }
-
-  // Everything else, including no params, is internal traffic by business rule.
-  return {
-    source: "internal",
-    sub1: null,
-    sub2: null,
-    adaccountName,
-  };
-}
-
 type IulV6ClientProps = {
   initialPrelandName?: string | null;
-  initialEverflowTransactionId?: string | null;
+  initialEverflowServerResult?: EverflowServerClickResult | null;
 };
 
 export default function IulV6Client({
   initialPrelandName,
-  initialEverflowTransactionId,
+  initialEverflowServerResult,
 }: IulV6ClientProps) {
   const [activePrelandName, setActivePrelandName] = useState<string | null>(() =>
     getPrelandComponent(initialPrelandName) ? initialPrelandName?.trim() || null : null,
@@ -1136,7 +897,13 @@ export default function IulV6Client({
   const trackedAutoZipRef = useRef(false);
   const submittedLeadRef = useRef(false);
   const everflowClickRequestedRef = useRef(false);
-  const everflowTransactionPromiseRef = useRef<Promise<string | null> | null>(null);
+  const everflowTransactionPromiseRef = useRef<Promise<EverflowClientClickResult> | null>(null);
+  const everflowDiagnosticsRef = useRef<EverflowDiagnostics>({
+    directLink: false,
+    signature: "",
+    server: initialEverflowServerResult || null,
+    client: null,
+  });
   const phoneVerificationRequestRef = useRef(0);
   const leadUrlRef = useRef("");
   const runtimeConfigRef = useRef<RuntimeConfig>(defaultRuntimeConfig);
@@ -1240,44 +1007,49 @@ export default function IulV6Client({
 
   function trackEverflowDebug(stage: string, payload: AnalyticsEventPayload = {}) {
     const searchParams = new URLSearchParams(window.location.search);
-    const browserTransaction = readEverflowTransactionIdFromBrowserDetailed();
+    const signature = buildEverflowBrowserSignature(searchParams);
+    const reusableTransaction = getReusableEverflowTransaction(searchParams);
 
     trackFunnelEvent("everflow_debug", {
       ...getAnalyticsLeadPayload(),
       event_id: createEventId("everflow_debug"),
       step: currentStep === "phone" ? "contact" : currentStep,
       everflow_stage: stage,
+      everflow_signature: signature,
       oid: getTrimmedParam(searchParams, "oid") || undefined,
       affid: getTrimmedParam(searchParams, "affid") || undefined,
       source_id: getTrimmedParam(searchParams, "source_id") || undefined,
       url_sub1: getTrimmedParam(searchParams, "sub1") || undefined,
       url_sub2: getTrimmedParam(searchParams, "sub2") || undefined,
       preland_name: activePrelandName || undefined,
-      has_stored_transaction_id: Boolean(getStoredEverflowTransactionId()),
-      has_browser_transaction_id: Boolean(browserTransaction?.transactionId),
-      browser_transaction_source: browserTransaction?.source || undefined,
-      browser_transaction_key: browserTransaction?.key || undefined,
-      everflow_transaction_id: browserTransaction?.transactionId || undefined,
+      has_reusable_transaction_id: Boolean(reusableTransaction?.transactionId),
+      browser_transaction_source: reusableTransaction?.source || undefined,
+      browser_transaction_key: reusableTransaction?.key || undefined,
+      everflow_transaction_id: reusableTransaction?.transactionId || undefined,
+      server_status: everflowDiagnosticsRef.current.server?.status,
+      server_transaction_id: everflowDiagnosticsRef.current.server?.transactionId || undefined,
+      client_status: everflowDiagnosticsRef.current.client?.status,
+      client_transaction_id: everflowDiagnosticsRef.current.client?.transactionId || undefined,
       ...payload,
     });
   }
 
-  function storeEverflowBrowserTransactionIfReady(stage: string) {
-    const browserTransaction = readEverflowTransactionIdFromBrowserDetailed();
+  function storeEverflowReusableTransactionIfReady(stage: string) {
+    const searchParams = new URLSearchParams(window.location.search);
+    const reusableTransaction = getReusableEverflowTransaction(searchParams);
 
-    if (!browserTransaction?.transactionId) {
+    if (!reusableTransaction?.transactionId) {
       trackEverflowDebug(stage, {
         everflow_transaction_found: false,
       });
       return false;
     }
 
-    storeEverflowTransactionId(browserTransaction.transactionId);
     trackEverflowDebug(stage, {
       everflow_transaction_found: true,
-      everflow_transaction_id: browserTransaction.transactionId,
-      browser_transaction_source: browserTransaction.source,
-      browser_transaction_key: browserTransaction.key,
+      everflow_transaction_id: reusableTransaction.transactionId,
+      browser_transaction_source: reusableTransaction.source,
+      browser_transaction_key: reusableTransaction.key,
     });
     return true;
   }
@@ -1287,14 +1059,29 @@ export default function IulV6Client({
   }, []);
 
   useEffect(() => {
-    if (!initialEverflowTransactionId) return;
+    if (!initialEverflowServerResult) return;
 
-    storeEverflowTransactionId(initialEverflowTransactionId);
+    everflowDiagnosticsRef.current = {
+      ...everflowDiagnosticsRef.current,
+      directLink: initialEverflowServerResult.directLink,
+      signature: initialEverflowServerResult.request.signature,
+      server: initialEverflowServerResult,
+    };
+
+    if (initialEverflowServerResult.transactionId) {
+      storeEverflowTransaction(
+        initialEverflowServerResult.transactionId,
+        initialEverflowServerResult.request.signature,
+        "server",
+      );
+    }
+
     trackEverflowDebug("server_click_hydrated", {
-      everflow_transaction_found: true,
-      everflow_transaction_id: initialEverflowTransactionId,
+      everflow_transaction_found: Boolean(initialEverflowServerResult.transactionId),
+      everflow_transaction_id: initialEverflowServerResult.transactionId || undefined,
+      server_status: initialEverflowServerResult.status,
     });
-  }, [initialEverflowTransactionId]);
+  }, [initialEverflowServerResult]);
 
   useEffect(() => {
     if (everflowClickRequestedRef.current) return;
@@ -1302,26 +1089,36 @@ export default function IulV6Client({
     const searchParams = new URLSearchParams(window.location.search);
     if (!isEverflowDirectLink(searchParams)) return;
 
-    if (getStoredEverflowTransactionId()) {
-      trackEverflowDebug("browser_click_skipped_server_tid", {
+    const reusableTransaction = getReusableEverflowTransaction(searchParams);
+    if (reusableTransaction?.transactionId) {
+      trackEverflowDebug("browser_click_skipped_reusable_tid", {
         everflow_transaction_found: true,
-        everflow_transaction_id: getStoredEverflowTransactionId() || undefined,
+        everflow_transaction_id: reusableTransaction.transactionId,
+        browser_transaction_source: reusableTransaction.source,
       });
       return;
     }
 
     everflowClickRequestedRef.current = true;
     trackEverflowDebug("early_direct_link_detected", {
-      everflow_transaction_found: Boolean(readEverflowTransactionIdFromBrowser()),
+      everflow_transaction_found: false,
     });
 
-    everflowTransactionPromiseRef.current = requestEverflowDirectLinkTransaction(searchParams);
+    everflowTransactionPromiseRef.current = requestEverflowClientClick(searchParams);
 
     void everflowTransactionPromiseRef.current
-      .then((transactionId) => {
+      .then((clientResult) => {
+        everflowDiagnosticsRef.current = {
+          ...everflowDiagnosticsRef.current,
+          directLink: true,
+          signature: clientResult.signature,
+          client: clientResult,
+        };
         trackEverflowDebug("early_click_resolved", {
-          everflow_transaction_found: Boolean(transactionId),
-          everflow_transaction_id: transactionId || undefined,
+          everflow_transaction_found: Boolean(clientResult.transactionId),
+          everflow_transaction_id: clientResult.transactionId || undefined,
+          client_status: clientResult.status,
+          browser_transaction_source: clientResult.source,
         });
       })
       .catch((error) => {
@@ -1337,16 +1134,21 @@ export default function IulV6Client({
     if (currentStep !== "phone") return;
 
     const searchParams = new URLSearchParams(window.location.search);
-    if (!isEverflowDirectLink(searchParams) || getStoredEverflowTransactionId()) return;
+    if (!isEverflowDirectLink(searchParams)) return;
+
+    if (getReusableEverflowTransaction(searchParams)?.transactionId) {
+      storeEverflowReusableTransactionIfReady("contact_reusable_read");
+      return;
+    }
 
     if (!everflowTransactionPromiseRef.current) {
       trackEverflowDebug("contact_retry_click_started", {
-        everflow_transaction_found: Boolean(readEverflowTransactionIdFromBrowser()),
+        everflow_transaction_found: false,
       });
-      everflowTransactionPromiseRef.current = requestEverflowDirectLinkTransaction(searchParams);
+      everflowTransactionPromiseRef.current = requestEverflowClientClick(searchParams);
     }
 
-    if (storeEverflowBrowserTransactionIfReady("contact_initial_read")) {
+    if (storeEverflowReusableTransactionIfReady("contact_initial_read")) {
       return;
     }
 
@@ -1354,13 +1156,18 @@ export default function IulV6Client({
     // while the user is typing phone/email, store the TID before submit without
     // ever delaying the user.
     void everflowTransactionPromiseRef.current
-      ?.then((transactionId) => {
-        if (!transactionId) return;
-
-        storeEverflowTransactionId(transactionId);
+      ?.then((clientResult) => {
+        everflowDiagnosticsRef.current = {
+          ...everflowDiagnosticsRef.current,
+          directLink: true,
+          signature: clientResult.signature,
+          client: clientResult,
+        };
         trackEverflowDebug("contact_click_promise_resolved", {
-          everflow_transaction_found: true,
-          everflow_transaction_id: transactionId,
+          everflow_transaction_found: Boolean(clientResult.transactionId),
+          everflow_transaction_id: clientResult.transactionId || undefined,
+          client_status: clientResult.status,
+          browser_transaction_source: clientResult.source,
         });
       })
       .catch((error) => {
@@ -1371,7 +1178,7 @@ export default function IulV6Client({
 
     const startedAt = Date.now();
     const intervalId = window.setInterval(() => {
-      const didStoreTransaction = storeEverflowBrowserTransactionIfReady("contact_watch_read");
+      const didStoreTransaction = storeEverflowReusableTransactionIfReady("contact_watch_read");
       if (didStoreTransaction || Date.now() - startedAt >= everflowTransactionWatchMs) {
         if (!didStoreTransaction) {
           trackEverflowDebug("contact_watch_expired", {
@@ -2249,10 +2056,29 @@ export default function IulV6Client({
       setAnswers(completedAnswers);
 
       const urlParams = new URLSearchParams(window.location.search);
-      // Submit never waits for Everflow. If the age/contact background collection
-      // already found a TID, resolveTrafficAttribution will pick it up; otherwise
-      // the lead is saved immediately with sub2 null.
-      const trafficAttribution = resolveTrafficAttribution(urlParams);
+      const everflowSignature = buildEverflowBrowserSignature(urlParams);
+      const reusableEverflowTransaction = getReusableEverflowTransaction(urlParams);
+      // Submit never waits for Everflow. If server/client attribution already
+      // found a transaction ID for this exact click signature, it is used;
+      // otherwise the lead is saved immediately with sub2 null and diagnostics.
+      const trafficAttribution = resolveTrafficAttribution(
+        urlParams,
+        reusableEverflowTransaction?.transactionId || null,
+      );
+      const everflowDiagnostics: EverflowDiagnostics = {
+        ...everflowDiagnosticsRef.current,
+        directLink: isEverflowDirectLink(urlParams),
+        signature: everflowSignature,
+        final: {
+          source: getFinalEverflowSource(
+            trafficAttribution.sub2,
+            reusableEverflowTransaction?.source,
+          ),
+          sub1: trafficAttribution.sub1,
+          sub2: trafficAttribution.sub2,
+        },
+      };
+      everflowDiagnosticsRef.current = everflowDiagnostics;
       if (isEverflowDirectLink(urlParams)) {
         trackEverflowDebug("submit_attribution_resolved", {
           everflow_transaction_found: Boolean(trafficAttribution.sub2),
@@ -2260,6 +2086,7 @@ export default function IulV6Client({
           resolved_source: trafficAttribution.source,
           resolved_sub1: trafficAttribution.sub1 || undefined,
           resolved_sub2: trafficAttribution.sub2 || undefined,
+          everflow_final_source: everflowDiagnostics.final?.source,
         });
       }
       const cleanedAnswers = Object.fromEntries(
@@ -2294,6 +2121,7 @@ export default function IulV6Client({
             salePath: shouldUsePayPerCallThankYou ? "call" : "lead",
             adaccountName: trafficAttribution.adaccountName || "",
             trafficAttribution,
+            everflow: everflowDiagnostics,
             phoneVerification: phoneVerificationData,
             phoneVerificationToken: phoneVerificationData?.verificationToken || null,
             leadUrl: leadUrlRef.current || window.location.href,

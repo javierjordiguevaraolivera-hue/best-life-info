@@ -24,6 +24,7 @@ type LeadPayload = {
       sub2?: unknown;
       adaccountName?: unknown;
     };
+    everflow?: unknown;
     phoneVerification?: VeriphoneResponse | null;
     phoneVerificationToken?: unknown;
     leadUrl?: string;
@@ -447,6 +448,7 @@ export async function POST(request: Request) {
   const state = normalizeState(restAnswers.state);
   const zipCode = normalizeZipCode(restAnswers.zipCode);
   const salePath = body.meta?.salePath === "call" ? "call" : "lead";
+  const everflowDiagnostics = body.meta?.everflow ?? null;
   const leadStatus = salePath === "call" ? "pending_call" : "ready_for_sell";
   const leadLanguage = getLeadLanguage();
   const leadDomain = getLeadDomain();
@@ -483,6 +485,7 @@ export async function POST(request: Request) {
       flags: riskFlags,
       veriphone: phoneValidation.veriphone || null,
     },
+    everflow: everflowDiagnostics,
   };
   const { data, error } = await supabase
     .from("leads")
